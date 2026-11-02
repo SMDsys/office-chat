@@ -17,7 +17,16 @@ if exist "%~dp0config.json" (
 )
 if defined PORT set "PORT=%PORT: =%"
 if not defined PORT set "PORT=8080"
-if not defined URL set "URL=http://localhost:%PORT%"
+
+set "TLSVAL="
+if exist "%~dp0config.json" (
+  for /f "tokens=2 delims=:," %%a in ('findstr /i /c:"tls" "%~dp0config.json" 2^>nul') do set "TLSVAL=%%a"
+)
+if defined TLSVAL set "TLSVAL=%TLSVAL: =%"
+set "SCHEME=http"
+if /i "%TLSVAL%"=="true" set "SCHEME=https"
+
+if not defined URL set "URL=%SCHEME%://localhost:%PORT%"
 
 rem Открываем в отдельном окне без адресной строки (Edge, затем Chrome),
 rem если не получилось — в браузере по умолчанию.

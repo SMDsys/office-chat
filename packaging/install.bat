@@ -33,6 +33,15 @@ if exist "%~dp0config.json" (
 if defined PORT set "PORT=%PORT: =%"
 if not defined PORT set "PORT=8080"
 
+rem --- HTTPS включён? (tls: true в config.json) ---
+set "TLSVAL="
+if exist "%~dp0config.json" (
+  for /f "tokens=2 delims=:," %%a in ('findstr /i /c:"tls" "%~dp0config.json" 2^>nul') do set "TLSVAL=%%a"
+)
+if defined TLSVAL set "TLSVAL=%TLSVAL: =%"
+set "SCHEME=http"
+if /i "%TLSVAL%"=="true" set "SCHEME=https"
+
 echo.
 echo   Устанавливаю службу «Офис-чат»…
 echo.
@@ -60,9 +69,9 @@ echo   ────────────────────────�
 echo   Готово! Служба «Офис-чат» установлена,
 echo   запущена и будет стартовать вместе с Windows.
 echo.
-echo   На этом компьютере:  http://localhost:%PORT%
+echo   На этом компьютере:  %SCHEME%://localhost:%PORT%
 for /f "tokens=2 delims=:" %%i in ('ipconfig ^| findstr /c:"IPv4"') do (
-  for /f "tokens=* delims= " %%j in ("%%i") do echo   В локальной сети:    http://%%j:%PORT%
+  for /f "tokens=* delims= " %%j in ("%%i") do echo   В локальной сети:    %SCHEME%://%%j:%PORT%
 )
 echo.
 echo   Откройте адрес в браузере и зарегистрируйте первый
