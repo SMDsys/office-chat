@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Офис-чат</title>
+<meta name="theme-color" content="#101417">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12 20 4l-5 16-4-6-7-2Z"/><path d="M11 14l4-4"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M8 12.5 14.5 6a4 4 0 0 1 5.5 5.5l-7 7a6 6 0 0 1-8.5-8.5l6.5-6.5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 4h6l-1 6 3 3H7l3-3-1-6Z"/><path d="M12 13v7"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L20 8l-4-4L4 16v4Z"/><path d="m14 6 4 4"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/><path d="M10 11v5M14 11v5"/></symbol>
+  <symbol id="i-reply" viewBox="0 0 24 24"><path d="M9 7 4 12l5 5"/><path d="M4 12h8a7 7 0 0 1 7 7v1"/></symbol>
+  <symbol id="i-smile" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 5.5a3.5 3.5 0 0 1 0 6.8M18 14.5c2.3.7 4 2.8 4 5.5"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M14 5H6v14h8"/><path d="M11 12h9M17 9l3 3-3 3"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v15M6 13l6 6 6-6"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 24 24"><path d="M9 4 7 20M17 4l-2 16M4 9h16M3 15h16"/></symbol>
+  <symbol id="i-at" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 5 5L19 7"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6V3Z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 18 5-5 4 4 3-3 4 4"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 3H4l2-3Z"/><path d="M10 21h4"/></symbol>
+</svg>
+
+<!-- ЭКРАН ВХОДА -->
+<div class="auth" id="auth">
+  <div class="auth-side">
+    <div class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 40 40"><rect x="2.5" y="4.5" width="26" height="19" rx="5.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M9.5 23.5V30l7.5-6.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><rect x="19" y="15.5" width="18" height="15" rx="4.5" fill="var(--accent)"/><path d="M24 21h8M24 26h5.5" stroke="var(--accent-ink)" stroke-width="2" stroke-linecap="round"/></svg>
+    </div>
+    <h1>Офис-чат</h1>
+    <p class="auth-lead">Переписка внутри вашей сети. Без интернета, без облака — всё на вашем сервере.</p>
+    <ul class="auth-list">
+      <li>Общий канал и отдельные комнаты</li>
+      <li>Личные сообщения и файлы до 50 МБ</li>
+      <li>История хранится на сервере</li>
+    </ul>
+    <p class="auth-foot" id="authVersion"></p>
+  </div>
+
+  <div class="auth-panel">
+    <div class="auth-card">
+      <div class="tabs" role="tablist">
+        <button class="tab is-on" id="tabLogin" role="tab" aria-selected="true">Вход</button>
+        <button class="tab" id="tabRegister" role="tab" aria-selected="false">Регистрация</button>
+      </div>
+
+      <form id="loginForm" class="form" autocomplete="on">
+        <label class="field">
+          <span>Логин</span>
+          <input name="login" id="loginName" autocomplete="username" required spellcheck="false" autocapitalize="none">
+        </label>
+        <label class="field">
+          <span>Пароль</span>
+          <input name="password" id="loginPass" type="password" autocomplete="current-password" required>
+        </label>
+        <p class="form-error" id="loginError" role="alert"></p>
+        <button class="btn btn-primary btn-block" type="submit" id="loginBtn">Войти</button>
+      </form>
+
+      <form id="registerForm" class="form" autocomplete="on" hidden>
+        <label class="field">
+          <span>Имя и фамилия</span>
+          <input name="name" id="regName" autocomplete="name" required maxlength="60" placeholder="Иван Петров">
+        </label>
+        <label class="field">
+          <span>Логин</span>
+          <input name="login" id="regLogin" autocomplete="username" required spellcheck="false" autocapitalize="none" pattern="[a-z0-9._\-]{3,24}" placeholder="ivan">
+          <small>3–24 символа: латиница, цифры, точка, дефис</small>
+        </label>
+        <label class="field">
+          <span>Пароль</span>
+          <input name="password" id="regPass" type="password" autocomplete="new-password" required minlength="6" placeholder="не короче 6 символов">
+        </label>
+        <p class="form-error" id="registerError" role="alert"></p>
+        <button class="btn btn-primary btn-block" type="submit" id="registerBtn">Создать учётную запись</button>
+        <p class="form-hint" id="firstUserHint" hidden>Вы первый — эта учётная запись станет администратором.</p>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ОСНОВНОЙ ЭКРАН -->
+<div class="app" id="app" hidden>
+  <aside class="rail">
+    <div class="rail-head">
+      <div class="rail-brand">
+        <svg viewBox="0 0 40 40" aria-hidden="true"><rect x="2.5" y="4.5" width="26" height="19" rx="5.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M9.5 23.5V30l7.5-6.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><rect x="19" y="15.5" width="18" height="15" rx="4.5" fill="var(--accent)"/><path d="M24 21h8M24 26h5.5" stroke="var(--accent-ink)" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Офис-чат</span>
+      </div>
+      <button class="icon-btn" id="searchToggle" title="Поиск (Ctrl+K)" aria-label="Поиск">
+        <svg class="icon"><use href="#i-search"/></svg>
+      </button>
+    </div>
+
+    <div class="search" id="searchPanel" hidden>
+      <svg class="icon"><use href="#i-search"/></svg>
+      <input id="searchInput" placeholder="Поиск по сообщениям" autocomplete="off">
+      <button class="icon-btn" id="searchClose" aria-label="Закрыть поиск"><svg class="icon"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="search-results" id="searchResults" hidden></div>
+
+    <div class="rail-filter" id="filterWrap">
+      <svg class="icon"><use href="#i-search"/></svg>
+      <input id="chatFilter" placeholder="Фильтр по чатам" autocomplete="off">
+    </div>
+
+    <nav class="chats" id="chatList" aria-label="Чаты"></nav>
+
+    <div class="rail-foot">
+      <button class="me" id="meBox" title="Профиль и настройки">
+        <span class="avatar" id="meAvatar"></span>
+        <span class="me-text">
+          <strong id="meName">—</strong>
+          <small id="meStatus">в сети</small>
+        </span>
+        <svg class="icon"><use href="#i-gear"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <main class="chat">
+    <header class="chat-head">
+      <div class="chat-id">
+        <span class="chat-glyph" id="chatGlyph"><svg class="icon"><use href="#i-hash"/></svg></span>
+        <div>
+          <h1 id="chatName">Общий</h1>
+          <p id="chatTopic">Общий канал — здесь пишут все</p>
+        </div>
+      </div>
+      <div class="chat-tools">
+        <span class="typing" id="typing" aria-live="polite"></span>
+        <button class="icon-btn" id="pinsToggle" title="Закреплённые сообщения" aria-label="Закреплённые сообщения">
+          <svg class="icon"><use href="#i-pin"/></svg>
+          <span class="dot-badge" id="pinsCount" hidden></span>
+        </button>
+        <button class="icon-btn" id="sideToggle" title="Участники и закреплённые" aria-label="Участники">
+          <svg class="icon"><use href="#i-users"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="feed-wrap">
+      <div class="feed" id="feed" tabindex="0"></div>
+      <button class="jump" id="jumpBtn" hidden>
+        <svg class="icon"><use href="#i-down"/></svg>
+        <span>Вниз</span>
+      </button>
+      <div class="empty-chat" id="emptyChat" hidden>
+        <div class="empty-mark"><svg class="icon"><use href="#i-hash"/></svg></div>
+        <h2>Здесь пока пусто</h2>
+        <p>Напишите первое сообщение — его увидят все, у кого есть доступ к этому каналу.</p>
+      </div>
+    </div>
+
+    <div class="composer" id="composer">
+      <div class="composer-note" id="replyNote" hidden>
+        <svg class="icon"><use href="#i-reply"/></svg>
+        <div><span id="replyWho"></span><p id="replyText"></p></div>
+        <button class="icon-btn" id="replyCancel" aria-label="Отменить ответ"><svg class="icon"><use href="#i-x"/></svg></button>
+      </div>
+      <div class="composer-note is-edit" id="editNote" hidden>
+        <svg class="icon"><use href="#i-edit"/></svg>
+        <div><span>Редактирование</span><p id="editText"></p></div>
+        <button class="icon-btn" id="editCancel" aria-label="Отменить редактирование"><svg class="icon"><use href="#i-x"/></svg></button>
+      </div>
+      <div class="composer-drop" id="dropHint" hidden>Отпустите файл, чтобы прикрепить</div>
+      <div class="composer-files" id="pendingFiles"></div>
+      <div class="composer-box" id="composerBox">
+        <button class="icon-btn attach" id="attachBtn" title="Прикрепить файл" aria-label="Прикрепить файл">
+          <svg class="icon"><use href="#i-clip"/></svg>
+        </button>
+        <textarea id="input" rows="1" placeholder="Написать сообщение…" maxlength="4000" aria-label="Сообщение"></textarea>
+        <button class="send" id="sendBtn" title="Отправить (Enter)" aria-label="Отправить">
+          <svg class="icon"><use href="#i-send"/></svg>
+        </button>
+      </div>
+      <div class="composer-hint">Enter — отправить · Shift+Enter — новая строка · файл можно перетащить в окно</div>
+      <input type="file" id="fileInput" multiple hidden>
+    </div>
+  </main>
+
+  <aside class="side" id="side">
+    <section class="side-sec">
+      <div class="side-title">
+        <h2>Закреплённые</h2>
+        <span id="pinsTotal"></span>
+      </div>
+      <div class="pins" id="pins"></div>
+    </section>
+    <section class="side-sec side-members">
+      <div class="side-title">
+        <h2>Участники</h2>
+        <span id="membersTotal"></span>
+      </div>
+      <div class="members" id="members"></div>
+    </section>
+  </aside>
+</div>
+
+<div class="modal-root" id="modalRoot"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
