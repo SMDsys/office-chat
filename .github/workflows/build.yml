@@ -68,7 +68,8 @@ jobs:
           cp packaging/config.json packaging/install.bat packaging/uninstall.bat \
              packaging/run.bat "packaging/Подключиться.bat" packaging/README.txt dist/
           cd dist
-          zip -r "../OfficeChat-${GITHUB_REF_NAME}-win64.zip" .
+          VERSION="${GITHUB_REF_NAME#v}"
+          zip -r "../OfficeChat-${VERSION}-win64.zip" .
       - uses: softprops/action-gh-release@v2
         with:
           files: OfficeChat-*-win64.zip
