@@ -123,6 +123,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.setSessionCookie(w, sess.Token)
+	a.store.Audit(u.Login, "register", "", "")
 	a.log.Printf("новый пользователь: %s (%s)", u.Name, u.Login)
 	a.hub.Broadcast(Event{Type: "user.new", Data: u.Public(true)})
 	writeJSON(w, 200, map[string]any{"user": u.Public(true)})
@@ -734,6 +735,7 @@ func (a *App) handleAdminReset(w http.ResponseWriter, r *http.Request, u *User) 
 		x.PassHash = hash
 	})
 	a.store.DeleteUserSessions(id)
+	a.store.Audit(u.Login, "reset", target.Login, "")
 	a.log.Printf("админ %s сбросил пароль пользователю %s", u.Login, target.Login)
 	writeJSON(w, 200, map[string]any{"password": password})
 }
@@ -762,8 +764,20 @@ func (a *App) handleAdminBlock(w http.ResponseWriter, r *http.Request, u *User) 
 	if req.Blocked {
 		a.store.DeleteUserSessions(id)
 	}
+	action := "unblock"
+	if req.Blocked {
+		action = "block"
+	}
+	a.store.Audit(u.Login, action, target.Login, "")
 	a.hub.Broadcast(Event{Type: "user.update", Data: target.Public(false)})
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (a *App) handleAdminAudit(w http.ResponseWriter, r *http.Request, u *User) {
+	if !a.requireAdmin(w, u) {
+		return
+	}
+	writeJSON(w, 200, map[string]any{"entries": a.store.AuditLog(auditReadLimit)})
 }
 
 func generatePassword(n int) string {

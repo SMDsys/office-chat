@@ -166,3 +166,24 @@ func TestCanAccessDM(t *testing.T) {
 		t.Fatal("общий канал должен быть доступен всем")
 	}
 }
+
+func TestAuditLog(t *testing.T) {
+	s := testStore(t)
+	s.Audit("ivan", "reset", "petr", "")
+	s.Audit("ivan", "block", "petr", "")
+	s.Audit("petr", "register", "", "")
+
+	entries := s.AuditLog(2)
+	if len(entries) != 2 {
+		t.Fatalf("ожидали 2 записи, получили %d", len(entries))
+	}
+	if entries[0].Action != "register" || entries[0].Actor != "petr" {
+		t.Fatalf("новая запись должна быть первой: %+v", entries[0])
+	}
+	if entries[1].Action != "block" || entries[1].Target != "petr" {
+		t.Fatalf("вторая запись не совпала: %+v", entries[1])
+	}
+	if all := s.AuditLog(100); len(all) != 3 {
+		t.Fatalf("ожидали 3 записи, получили %d", len(all))
+	}
+}

@@ -54,6 +54,11 @@
     return isNaN(d) ? '' : timeFmt.format(d);
   }
 
+  function fmtDateTime(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? '' : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+
   function fmtSize(n) {
     if (!n && n !== 0) return '';
     if (n < 1024) return n + ' Б';
@@ -1889,12 +1894,37 @@
     };
     render();
 
+    const auditBox = el('div', { class: 'audit-list' }, el('p', { class: 'modal-text' }, 'Загрузка…'));
+    const auditText = (e) => {
+      switch (e.action) {
+        case 'reset': return `${e.actor} сбросил пароль ${e.target}`;
+        case 'block': return `${e.actor} заблокировал ${e.target}`;
+        case 'unblock': return `${e.actor} разблокировал ${e.target}`;
+        case 'register': return `${e.actor} зарегистрировался`;
+        default: return `${e.actor}: ${e.action}${e.target ? ' ' + e.target : ''}`;
+      }
+    };
+    api('/api/admin/audit').then((data) => {
+      auditBox.textContent = '';
+      if (!data.entries || !data.entries.length) {
+        auditBox.append(el('p', { class: 'modal-text' }, 'Пока пусто'));
+        return;
+      }
+      for (const e of data.entries) {
+        auditBox.append(el('div', { class: 'audit-row' },
+          el('span', { class: 'audit-time' }, fmtDateTime(e.at)),
+          el('span', { class: 'audit-text' }, auditText(e))));
+      }
+    }).catch(() => { auditBox.textContent = 'Не удалось загрузить журнал'; });
+
     openModal({
       title: 'Сотрудники',
       wide: true,
       body: [
         el('p', { class: 'modal-text' }, 'Новый сотрудник регистрируется сам на странице входа. Здесь можно сбросить пароль или закрыть доступ.'),
         list,
+        el('h3', { class: 'modal-sub' }, 'Журнал действий'),
+        auditBox,
       ],
       footer: [el('button', { class: 'btn btn-primary', onclick: () => modalStack[modalStack.length - 1]() }, 'Закрыть')],
     });

@@ -24,7 +24,7 @@ import (
 //go:embed web
 var webFiles embed.FS
 
-var version = "1.2.0"
+var version = "1.3.0"
 
 type Config struct {
 	Port    int    `json:"port"`
@@ -373,6 +373,7 @@ func (a *App) routes() http.Handler {
 
 	mux.HandleFunc("POST /api/admin/users/{id}/reset", a.auth(a.handleAdminReset))
 	mux.HandleFunc("POST /api/admin/users/{id}/block", a.auth(a.handleAdminBlock))
+	mux.HandleFunc("GET /api/admin/audit", a.auth(a.handleAdminAudit))
 
 	mux.Handle("/", staticHandler())
 	return a.middleware(mux)

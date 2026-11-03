@@ -1507,6 +1507,31 @@ input, textarea { font-family: inherit; }
 .admin-row .icon-btn { width: 28px; height: 28px; }
 .admin-row .icon-btn .icon { width: 15px; height: 15px; }
 
+.modal-sub {
+  margin: 18px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.audit-list {
+  max-height: 190px;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+}
+.audit-row {
+  display: flex;
+  gap: 10px;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.audit-row:last-child { border-bottom: 0; }
+.audit-time { flex: none; width: 92px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.audit-text { min-width: 0; }
+
 .temp-pass {
   display: flex;
   align-items: center;
