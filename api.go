@@ -392,6 +392,10 @@ func (a *App) handleEditMessage(w http.ResponseWriter, r *http.Request, u *User)
 		writeErr(w, 404, "сообщение не найдено")
 		return
 	}
+	if !a.store.CanAccess(chatID, u.ID) {
+		writeErr(w, 403, "нет доступа к этому чату")
+		return
+	}
 	if msg.UserID != u.ID && !u.IsAdmin {
 		writeErr(w, 403, "можно редактировать только свои сообщения")
 		return
@@ -430,6 +434,10 @@ func (a *App) handleDeleteMessage(w http.ResponseWriter, r *http.Request, u *Use
 	msg, chatID := a.store.Message(id)
 	if msg == nil {
 		writeErr(w, 404, "сообщение не найдено")
+		return
+	}
+	if !a.store.CanAccess(chatID, u.ID) {
+		writeErr(w, 403, "нет доступа к этому чату")
 		return
 	}
 	if msg.UserID != u.ID && !u.IsAdmin {
@@ -637,6 +645,17 @@ func (a *App) handleRead(w http.ResponseWriter, r *http.Request, u *User) {
 	a.store.MarkRead(u.ID, req.ChatID, at)
 	a.hub.Publish(Event{Type: "read", Data: map[string]any{
 		"chatId": req.ChatID,
+		"userId": u.ID,
+		"at":     at,
+	}}, func(uid string) bool { return uid == u.ID })
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (a *App) handleReadAll(w http.ResponseWriter, r *http.Request, u *User) {
+	at := time.Now()
+	a.store.MarkAllRead(u.ID, at)
+	a.hub.Publish(Event{Type: "read", Data: map[string]any{
+		"chatId": "",
 		"userId": u.ID,
 		"at":     at,
 	}}, func(uid string) bool { return uid == u.ID })

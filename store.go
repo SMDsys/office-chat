@@ -460,6 +460,28 @@ func (s *Store) MarkRead(userID, chatID string, at time.Time) {
 	}
 }
 
+// MarkAllRead отмечает прочитанными все чаты, доступные пользователю.
+func (s *Store) MarkAllRead(userID string, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u := s.users[userID]
+	if u == nil {
+		return
+	}
+	if u.Reads == nil {
+		u.Reads = map[string]time.Time{}
+	}
+	for _, c := range s.channels {
+		if c.IsDM && !contains(c.Members, userID) {
+			continue
+		}
+		if cur := u.Reads[c.ID]; at.After(cur) {
+			u.Reads[c.ID] = at
+			s.dirtyUsers = true
+		}
+	}
+}
+
 // ---------- Каналы ----------
 
 func (s *Store) Channel(id string) *Channel {

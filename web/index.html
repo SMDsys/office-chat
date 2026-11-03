@@ -101,6 +101,9 @@
         <svg viewBox="0 0 40 40" aria-hidden="true"><rect x="2.5" y="4.5" width="26" height="19" rx="5.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M9.5 23.5V30l7.5-6.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><rect x="19" y="15.5" width="18" height="15" rx="4.5" fill="var(--accent)"/><path d="M24 21h8M24 26h5.5" stroke="var(--accent-ink)" stroke-width="2" stroke-linecap="round"/></svg>
         <span>Офис-чат</span>
       </div>
+      <button class="icon-btn" id="readAllBtn" title="Отметить всё прочитанным" aria-label="Отметить всё прочитанным">
+        <svg class="icon"><use href="#i-check"/></svg>
+      </button>
       <button class="icon-btn" id="searchToggle" title="Поиск (Ctrl+K)" aria-label="Поиск">
         <svg class="icon"><use href="#i-search"/></svg>
       </button>
@@ -187,8 +190,9 @@
         <button class="send" id="sendBtn" title="Отправить (Enter)" aria-label="Отправить">
           <svg class="icon"><use href="#i-send"/></svg>
         </button>
+        <div class="mention-pop" id="mentionPop" hidden></div>
       </div>
-      <div class="composer-hint">Enter — отправить · Shift+Enter — новая строка · файл можно перетащить в окно</div>
+      <div class="composer-hint">Enter — отправить · Shift+Enter — строка · @ — упомянуть коллегу · файл можно перетащить в окно</div>
       <input type="file" id="fileInput" multiple hidden>
     </div>
   </main>

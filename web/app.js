@@ -116,6 +116,62 @@
 
   function escapeReg(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
+  // ---------- Упоминания ----------
+
+  const MENTION_RE = /(^|[\s([{«"'“])@([a-z0-9._-]{2,24})\b/gi;
+
+  function userByLogin(login) {
+    const q = String(login || '').toLowerCase();
+    for (const u of state.users.values()) {
+      if (u.login.toLowerCase() === q) return u;
+    }
+    return null;
+  }
+
+  function mentionIds(text) {
+    const ids = [];
+    if (!text) return ids;
+    const re = new RegExp(MENTION_RE.source, 'gi');
+    let m;
+    while ((m = re.exec(text))) {
+      const u = userByLogin(m[2]);
+      if (u) ids.push(u.id);
+      else if (m[2].toLowerCase() === 'all') ids.push('all');
+    }
+    return ids;
+  }
+
+  function mentionsMe(text) {
+    if (!state.me) return false;
+    return mentionIds(text).some(id => id === 'all' || id === state.me.id);
+  }
+
+  // renderText рисует текст сообщения: ссылки и @упоминания.
+  function renderText(text) {
+    const frag = document.createDocumentFragment();
+    const re = new RegExp(MENTION_RE.source, 'gi');
+    let last = 0, m;
+    while ((m = re.exec(text))) {
+      const at = m.index + m[1].length;
+      if (at > last) frag.append(linkify(text.slice(last, at)));
+      const login = m[2].toLowerCase();
+      const u = userByLogin(login);
+      const isAll = login === 'all' && !u;
+      if (u || isAll) {
+        const mine = state.me && (isAll || u.id === state.me.id);
+        frag.append(el('span', {
+          class: 'mention' + (mine ? ' is-me' : ''),
+          title: isAll ? 'Упоминание всех участников' : '@' + u.login,
+        }, '@' + login));
+      } else {
+        frag.append('@' + m[2]);
+      }
+      last = at + 1 + m[2].length;
+    }
+    if (last < text.length) frag.append(linkify(text.slice(last)));
+    return frag;
+  }
+
   function highlight(text, q) {
     const frag = document.createDocumentFragment();
     if (!q) { frag.append(text); return frag; }
@@ -184,6 +240,8 @@
     loadingOlder: false,
     lastRead: { id: null, t: 0 },
     hasUsers: false,
+    notify: localStorage.getItem('oc-notify') === '1',
+    mentions: new Set(),
   };
 
   class ApiError extends Error {
@@ -244,6 +302,53 @@
     o1.connect(gain);
     o1.start(t);
     o1.stop(t + 0.28);
+  }
+
+  // playMention — короткая трель, когда упомянули лично.
+  function playMention() {
+    if (!state.sound) return;
+    initAudio();
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    [880, 1174.66, 1567.98].forEach((freq, i) => {
+      const start = t + i * 0.1;
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.08, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.2);
+      gain.connect(audioCtx.destination);
+      const o = audioCtx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(freq, start);
+      o.connect(gain);
+      o.start(start);
+      o.stop(start + 0.22);
+    });
+  }
+
+  function notifyMessage(m, chat, mention) {
+    if (!state.notify || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    if (document.visibilityState === 'visible' && document.hasFocus()) return;
+    const author = state.users.get(m.userId);
+    const title = chat.isDm
+      ? (author ? author.name : 'Личные сообщения')
+      : `${chatTitle(chat)}${author ? ' · ' + author.name : ''}`;
+    let body = m.text || (m.files && m.files.length ? '📎 ' + m.files[0].name : 'Новое сообщение');
+    if (body.length > 180) body = body.slice(0, 177) + '…';
+    try {
+      const n = new Notification(title, {
+        body,
+        tag: 'oc-' + m.chatId,
+        icon: '/favicon.svg',
+        silent: state.sound,
+      });
+      n.onclick = () => {
+        window.focus();
+        openChat(m.chatId);
+        n.close();
+      };
+    } catch (_) {}
   }
 
   // ============================================================
@@ -440,7 +545,13 @@
       }
     }
     for (const [id, c] of fresh) state.chats.set(id, c);
-    for (const c of data.chats) state.unread.set(c.id, c.unread || 0);
+    state.mentions.clear();
+    for (const c of data.chats) {
+      state.unread.set(c.id, c.unread || 0);
+      if (c.unread && c.lastMessage && c.lastMessage.userId !== state.me.id && mentionsMe(c.lastMessage.text)) {
+        state.mentions.add(c.id);
+      }
+    }
     state.online = new Set(data.online);
     state.version = data.version || state.version;
 
@@ -570,7 +681,13 @@
       }
       case 'read': {
         if (ev.data.userId === state.me.id) {
-          state.unread.set(ev.data.chatId, 0);
+          if (ev.data.chatId) {
+            state.unread.set(ev.data.chatId, 0);
+            state.mentions.delete(ev.data.chatId);
+          } else {
+            for (const id of state.unread.keys()) state.unread.set(id, 0);
+            state.mentions.clear();
+          }
           renderChats();
         }
         break;
@@ -592,6 +709,7 @@
 
     const mine = m.userId === state.me.id;
     const active = state.activeChat === m.chatId && document.visibilityState === 'visible';
+    const mention = !mine && mentionsMe(m.text);
 
     if (active) {
       const atBottom = isAtBottom();
@@ -599,8 +717,14 @@
       markRead();
     } else if (!mine) {
       state.unread.set(m.chatId, (state.unread.get(m.chatId) || 0) + 1);
-      playPing();
+      if (mention) {
+        state.mentions.add(m.chatId);
+        playMention();
+      } else {
+        playPing();
+      }
     }
+    if (!mine) notifyMessage(m, chat, mention);
     renderChats();
   }
 
@@ -721,7 +845,13 @@
       el('strong', {}, chatTitle(chat)),
       el('small', {}, lastPreview(chat))));
 
-    if (unread) node.append(el('span', { class: 'badge' }, unread > 99 ? '99+' : String(unread)));
+    if (unread) {
+      const mentioned = state.mentions.has(chat.id);
+      node.append(el('span', {
+        class: 'badge' + (mentioned ? ' is-mention' : ''),
+        title: mentioned ? 'Вас упомянули' : 'Непрочитанные сообщения',
+      }, mentioned ? '@' : (unread > 99 ? '99+' : String(unread))));
+    }
     return node;
   }
 
@@ -849,6 +979,7 @@
 
     const input = $('#input');
     input.value = state.drafts[id] || '';
+    hideMentionPop();
     autoGrow();
     updateSendState();
 
@@ -956,7 +1087,7 @@
     } else {
       if (m.text) {
         const text = el('div', { class: 'msg-text' });
-        text.append(linkify(m.text));
+        text.append(renderText(m.text));
         body.append(text);
       }
       if (m.files && m.files.length) body.append(renderFiles(m.files));
@@ -1213,6 +1344,83 @@
   // ============================================================
 
   const input = $('#input');
+  const mentionPop = $('#mentionPop');
+  let mentionItems = [];
+  let mentionSel = 0;
+
+  function currentMentionToken() {
+    const pos = input.selectionStart;
+    if (pos == null) return null;
+    const before = input.value.slice(0, pos);
+    const m = before.match(/(^|[\s(])@([a-z0-9._-]{0,24})$/i);
+    if (!m) return null;
+    return { start: pos - m[2].length - 1, end: pos, query: m[2].toLowerCase() };
+  }
+
+  function mentionCandidates(q) {
+    const chat = state.chats.get(state.activeChat);
+    const out = [];
+    if (chat && !chat.isDm && 'all'.startsWith(q)) {
+      out.push({ id: 'all', login: 'all', name: 'Все участники', color: '', all: true });
+    }
+    const users = [...state.users.values()]
+      .filter(u => u.id !== (state.me && state.me.id) && !u.blocked)
+      .filter(u => u.login.toLowerCase().includes(q) || u.name.toLowerCase().includes(q));
+    users.sort((a, b) => {
+      const ap = a.login.toLowerCase().startsWith(q) ? 0 : 1;
+      const bp = b.login.toLowerCase().startsWith(q) ? 0 : 1;
+      if (ap !== bp) return ap - bp;
+      const ao = state.online.has(a.id) ? 0 : 1;
+      const bo = state.online.has(b.id) ? 0 : 1;
+      if (ao !== bo) return ao - bo;
+      return a.name.localeCompare(b.name, 'ru');
+    });
+    return out.concat(users).slice(0, 6);
+  }
+
+  function hideMentionPop() {
+    mentionPop.hidden = true;
+    mentionPop.textContent = '';
+    mentionItems = [];
+    mentionSel = 0;
+  }
+
+  function renderMentionPop() {
+    const tok = state.editing ? null : currentMentionToken();
+    if (!tok) { hideMentionPop(); return; }
+    const items = mentionCandidates(tok.query);
+    if (!items.length) { hideMentionPop(); return; }
+    mentionItems = items;
+    if (mentionSel >= items.length) mentionSel = 0;
+    mentionPop.textContent = '';
+    items.forEach((u, i) => {
+      mentionPop.append(el('button', {
+        class: 'mention-item' + (i === mentionSel ? ' is-on' : ''),
+        type: 'button',
+        onmousedown: (e) => e.preventDefault(),
+        onclick: () => pickMention(u),
+      },
+        u.all ? el('span', { class: 'mention-avatar is-all' }, '@') : avatarEl(u, state.online.has(u.id), 24),
+        el('span', { class: 'mention-meta' },
+          el('strong', {}, u.all ? 'Все участники' : u.name),
+          el('small', {}, '@' + u.login))));
+    });
+    mentionPop.hidden = false;
+  }
+
+  function pickMention(u) {
+    const tok = currentMentionToken();
+    if (!tok) { hideMentionPop(); return; }
+    const insert = '@' + u.login + ' ';
+    input.value = input.value.slice(0, tok.start) + insert + input.value.slice(tok.end);
+    const caret = tok.start + insert.length;
+    input.setSelectionRange(caret, caret);
+    hideMentionPop();
+    autoGrow();
+    updateSendState();
+    input.focus();
+    if (state.activeChat) state.drafts[state.activeChat] = input.value;
+  }
 
   function autoGrow() {
     input.style.height = 'auto';
@@ -1229,6 +1437,7 @@
   input.addEventListener('input', () => {
     autoGrow();
     updateSendState();
+    renderMentionPop();
     if (state.editing) return;
     const chatId = state.activeChat;
     if (chatId) {
@@ -1244,6 +1453,30 @@
   let lastTypingSent = 0;
 
   input.addEventListener('keydown', (e) => {
+    if (!mentionPop.hidden && mentionItems.length) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        mentionSel = (mentionSel + 1) % mentionItems.length;
+        renderMentionPop();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        mentionSel = (mentionSel - 1 + mentionItems.length) % mentionItems.length;
+        renderMentionPop();
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        pickMention(mentionItems[mentionSel]);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        hideMentionPop();
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       sendMessage();
@@ -1255,6 +1488,9 @@
   });
 
   $('#sendBtn').addEventListener('click', sendMessage);
+
+  input.addEventListener('blur', () => setTimeout(hideMentionPop, 120));
+  input.addEventListener('click', renderMentionPop);
 
   async function sendMessage() {
     if (!state.activeChat) return;
@@ -1439,6 +1675,7 @@
     const at = last ? last.createdAt : new Date().toISOString();
     if ((state.unread.get(id) || 0) > 0) {
       state.unread.set(id, 0);
+      state.mentions.delete(id);
       renderChats();
     }
     const now = Date.now();
@@ -1521,6 +1758,33 @@
       },
     });
 
+    const notifySwitch = el('button', {
+      class: 'switch' + (state.notify ? ' is-on' : ''),
+      'aria-label': 'Уведомления на рабочем столе',
+      onclick: async (e) => {
+        if (state.notify) {
+          state.notify = false;
+          localStorage.setItem('oc-notify', '0');
+          e.currentTarget.classList.remove('is-on');
+          return;
+        }
+        if (!('Notification' in window)) {
+          toast('Браузер не поддерживает уведомления', 'error');
+          return;
+        }
+        let perm = Notification.permission;
+        if (perm === 'default') perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+          toast('Браузер запретил уведомления — разрешите их в настройках сайта', 'error');
+          return;
+        }
+        state.notify = true;
+        localStorage.setItem('oc-notify', '1');
+        e.currentTarget.classList.add('is-on');
+        toast('Уведомления включены');
+      },
+    });
+
     const body = [
       el('div', { class: 'profile-top' },
         avatarEl(me, true, 54),
@@ -1545,6 +1809,8 @@
       el('div', { class: 'section-label' }, 'Настройки'),
       el('div', { class: 'toggle-row' }, el('span', {}, 'Звук новых сообщений'), soundSwitch),
       el('div', { class: 'toggle-row' }, el('span', {}, 'Светлая тема'), themeSwitch),
+      el('div', { class: 'toggle-row' }, el('span', {}, 'Уведомления на рабочем столе'), notifySwitch),
+      el('p', { class: 'form-hint' }, 'Уведомления показываются, когда вкладка свёрнута или окно не в фокусе.'),
     ];
 
     if (me.isAdmin) {
@@ -1751,6 +2017,18 @@
 
   $('#searchToggle').addEventListener('click', () => toggleSearch());
   $('#searchClose').addEventListener('click', () => toggleSearch(false));
+
+  $('#readAllBtn').addEventListener('click', async () => {
+    try {
+      await api('/api/read/all', { method: 'POST', body: {} });
+      for (const id of state.unread.keys()) state.unread.set(id, 0);
+      state.mentions.clear();
+      renderChats();
+      toast('Все чаты отмечены прочитанными');
+    } catch (ex) {
+      toast(ex.message, 'error');
+    }
+  });
 
   $('#searchInput').addEventListener('input', debounce(async (e) => {
     const q = e.target.value.trim();

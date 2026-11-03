@@ -24,7 +24,7 @@ import (
 //go:embed web
 var webFiles embed.FS
 
-var version = "1.1.0"
+var version = "1.2.0"
 
 type Config struct {
 	Port    int    `json:"port"`
@@ -364,6 +364,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/chats/{id}", a.auth(a.handleDeleteChannel))
 	mux.HandleFunc("POST /api/dm", a.auth(a.handleCreateDM))
 	mux.HandleFunc("POST /api/read", a.auth(a.handleRead))
+	mux.HandleFunc("POST /api/read/all", a.auth(a.handleReadAll))
 	mux.HandleFunc("POST /api/typing", a.auth(a.handleTyping))
 	mux.HandleFunc("GET /api/search", a.auth(a.handleSearch))
 	mux.HandleFunc("GET /api/pins", a.auth(a.handlePins))

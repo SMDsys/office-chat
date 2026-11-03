@@ -103,6 +103,48 @@ func TestCleanupKeepsAttachedUploads(t *testing.T) {
 	}
 }
 
+func TestMarkAllRead(t *testing.T) {
+	s := testStore(t)
+	u1, err := s.CreateUser("user1", "Первый", "hash", "salt")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	u3, err := s.CreateUser("user3", "Третий", "hash", "salt")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	dm, err := s.CreateChannel("Личные", "", u1.ID)
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	s.mu.Lock()
+	s.channels[dm.ID].IsDM = true
+	s.channels[dm.ID].Members = []string{u1.ID, "u2"}
+	s.mu.Unlock()
+
+	at := time.Now()
+	s.MarkAllRead(u1.ID, at)
+
+	s.mu.Lock()
+	gotGeneral, gotDM := s.users[u1.ID].Reads[generalChannelID], s.users[u1.ID].Reads[dm.ID]
+	s.mu.Unlock()
+	if !gotGeneral.Equal(at) || !gotDM.Equal(at) {
+		t.Fatalf("не все доступные чаты отмечены: general=%v dm=%v", gotGeneral, gotDM)
+	}
+
+	s.MarkAllRead(u3.ID, at)
+	s.mu.Lock()
+	_, hasDM := s.users[u3.ID].Reads[dm.ID]
+	_, hasGeneral := s.users[u3.ID].Reads[generalChannelID]
+	s.mu.Unlock()
+	if hasDM {
+		t.Fatal("чужой личный чат отмечен прочитанным")
+	}
+	if !hasGeneral {
+		t.Fatal("общий канал не отмечен")
+	}
+}
+
 func TestCanAccessDM(t *testing.T) {
 	s := testStore(t)
 	dm, err := s.CreateChannel("Личные", "", "u1")
