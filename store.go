@@ -503,10 +503,8 @@ func (s *Store) ChannelsFor(userID string) []*Channel {
 	defer s.mu.Unlock()
 	out := make([]*Channel, 0, len(s.channels))
 	for _, c := range s.channels {
-		if c.IsDM {
-			if !contains(c.Members, userID) {
-				continue
-			}
+		if (c.IsDM || c.Private) && !contains(c.Members, userID) {
+			continue
 		}
 		cp := *c
 		if c.Members != nil {
@@ -524,6 +522,11 @@ func (s *Store) ChannelsFor(userID string) []*Channel {
 }
 
 func (s *Store) CreateChannel(name, topic, by string) (*Channel, error) {
+	return s.CreateChannelWith(name, topic, by, false, nil)
+}
+
+// CreateChannelWith создаёт канал; для закрытого канала участники обязательны.
+func (s *Store) CreateChannelWith(name, topic, by string, private bool, members []string) (*Channel, error) {
 	name = strings.TrimSpace(name)
 	topic = strings.TrimSpace(topic)
 	if runeLen(name) < 1 || runeLen(name) > 40 {
@@ -539,12 +542,20 @@ func (s *Store) CreateChannel(name, topic, by string) (*Channel, error) {
 			return nil, errors.New("канал с таким названием уже есть")
 		}
 	}
+	if private {
+		members = append([]string{by}, members...)
+		members = uniqueIDs(members)
+	}
 	c := &Channel{
 		ID:        randomID(),
 		Name:      name,
 		Topic:     topic,
+		Private:   private,
 		CreatedBy: by,
 		CreatedAt: time.Now(),
+	}
+	if private {
+		c.Members = members
 	}
 	s.channels[c.ID] = c
 	s.chats[c.ID] = &chatData{}
@@ -625,7 +636,7 @@ func (s *Store) CanAccess(chatID, userID string) bool {
 	if c == nil {
 		return false
 	}
-	if c.IsDM {
+	if c.IsDM || c.Private {
 		return contains(c.Members, userID)
 	}
 	return true
@@ -861,6 +872,18 @@ func (s *Store) DeleteSession(token string) {
 	s.mu.Unlock()
 }
 
+// DeleteOtherSessions завершает все сеансы пользователя, кроме указанного.
+func (s *Store) DeleteOtherSessions(userID, keep string) {
+	s.mu.Lock()
+	for tok, sess := range s.sessions {
+		if sess.UserID == userID && tok != keep {
+			delete(s.sessions, tok)
+		}
+	}
+	s.dirtySessions = true
+	s.mu.Unlock()
+}
+
 func (s *Store) DeleteUserSessions(userID string) {
 	s.mu.Lock()
 	for tok, sess := range s.sessions {
@@ -1008,27 +1031,7 @@ func (s *Store) Backup() error {
 			errs = append(errs, add("chats/"+id+".json", b))
 		}
 	}
-	uploadIDs := make([]string, 0, len(s.uploads))
-	for id := range s.uploads {
-		uploadIDs = append(uploadIDs, id)
-	}
 	s.mu.Unlock()
-	// Вложения добавляем после снятия блокировки: файлы неизменяемы,
-	// а чтение с диска не должно задерживать запись сообщений.
-	for _, id := range uploadIDs {
-		src, err := os.Open(filepath.Join(s.upDir, id))
-		if err != nil {
-			continue
-		}
-		w, err := zw.Create("uploads/" + id)
-		if err == nil {
-			_, err = io.Copy(w, src)
-		}
-		_ = src.Close()
-		if err != nil {
-			errs = append(errs, err)
-		}
-	}
 	for _, e := range errs {
 		if e != nil {
 			err = e
@@ -1049,6 +1052,10 @@ func (s *Store) Backup() error {
 		_ = os.Remove(tmp)
 		return err
 	}
+	// Вложения не дублируются в каждой копии: держим одно зеркало папки uploads.
+	if err := s.syncUploads(filepath.Join(dir, "uploads")); err != nil {
+		s.log.Printf("резервная копия вложений: %v", err)
+	}
 	// оставляем 10 последних копий
 	files, _ := filepath.Glob(filepath.Join(dir, "officechat-*.zip"))
 	sort.Strings(files)
@@ -1057,5 +1064,119 @@ func (s *Store) Backup() error {
 		files = files[1:]
 	}
 	s.log.Printf("резервная копия: %s", filepath.Base(name))
+	return nil
+}
+
+func uniqueIDs(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+func withoutID(ids []string, id string) []string {
+	out := ids[:0:0]
+	for _, x := range ids {
+		if x != id {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// UpdateChannelMembers добавляет и удаляет участников закрытого канала.
+func (s *Store) UpdateChannelMembers(id string, add, remove []string) (*Channel, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := s.channels[id]
+	if c == nil || c.IsDM {
+		return nil, errors.New("канал не найден")
+	}
+	if !c.Private {
+		return nil, errors.New("это открытый канал, участники не ограничены")
+	}
+	for _, uid := range add {
+		if s.users[uid] == nil {
+			continue
+		}
+		if !contains(c.Members, uid) {
+			c.Members = append(c.Members, uid)
+		}
+	}
+	for _, uid := range remove {
+		c.Members = withoutID(c.Members, uid)
+	}
+	if len(c.Members) == 0 {
+		return nil, errors.New("в канале должен остаться хотя бы один участник")
+	}
+	s.dirtyChannels = true
+	cp := *c
+	cp.Members = append([]string(nil), c.Members...)
+	return &cp, nil
+}
+
+// ExportMessages возвращает всю переписку чата в порядке отправки.
+func (s *Store) ExportMessages(chatID string) []*Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	chat := s.chats[chatID]
+	if chat == nil {
+		return []*Message{}
+	}
+	out := make([]*Message, 0, len(chat.Messages))
+	for _, m := range chat.Messages {
+		out = append(out, m.Clone())
+	}
+	return out
+}
+
+// syncUploads копирует в резервную папку только новые вложения.
+func (s *Store) syncUploads(dst string) error {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(s.upDir)
+	if err != nil {
+		return err
+	}
+	copied := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		target := filepath.Join(dst, e.Name())
+		if _, err := os.Stat(target); err == nil {
+			continue
+		}
+		src, err := os.Open(filepath.Join(s.upDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		tmp := target + ".tmp"
+		out, err := os.Create(tmp)
+		if err != nil {
+			_ = src.Close()
+			continue
+		}
+		_, err = io.Copy(out, src)
+		_ = src.Close()
+		cerr := out.Close()
+		if err != nil || cerr != nil {
+			_ = os.Remove(tmp)
+			continue
+		}
+		if err := os.Rename(tmp, target); err == nil {
+			copied++
+		}
+	}
+	if copied > 0 {
+		s.log.Printf("вложений скопировано в резерв: %d", copied)
+	}
 	return nil
 }

@@ -187,3 +187,48 @@ func TestAuditLog(t *testing.T) {
 		t.Fatalf("ожидали 3 записи, получили %d", len(all))
 	}
 }
+
+func TestPrivateChannelAccess(t *testing.T) {
+	s := testStore(t)
+	u1, _ := s.CreateUser("user1", "Первый", "hash", "salt")
+	u2, _ := s.CreateUser("user2", "Второй", "hash", "salt")
+	u3, _ := s.CreateUser("user3", "Третий", "hash", "salt")
+	ch, err := s.CreateChannelWith("Бухгалтерия", "", u1.ID, true, []string{u2.ID})
+	if err != nil {
+		t.Fatalf("CreateChannelWith: %v", err)
+	}
+	if !s.CanAccess(ch.ID, u1.ID) || !s.CanAccess(ch.ID, u2.ID) {
+		t.Fatal("участники закрытого канала должны иметь доступ")
+	}
+	if s.CanAccess(ch.ID, u3.ID) {
+		t.Fatal("посторонний получил доступ к закрытому каналу")
+	}
+	for _, c := range s.ChannelsFor(u3.ID) {
+		if c.ID == ch.ID {
+			t.Fatal("закрытый канал попал в список постороннего")
+		}
+	}
+	if _, err := s.UpdateChannelMembers(ch.ID, []string{u3.ID}, nil); err != nil {
+		t.Fatalf("UpdateChannelMembers add: %v", err)
+	}
+	if !s.CanAccess(ch.ID, u3.ID) {
+		t.Fatal("после добавления участник не получил доступ")
+	}
+	if _, err := s.UpdateChannelMembers(ch.ID, nil, []string{u1.ID, u2.ID, u3.ID}); err == nil {
+		t.Fatal("нельзя оставить канал без участников")
+	}
+}
+
+func TestDeleteOtherSessions(t *testing.T) {
+	s := testStore(t)
+	u, _ := s.CreateUser("user1", "Первый", "hash", "salt")
+	a, _ := s.CreateSession(u.ID)
+	b, _ := s.CreateSession(u.ID)
+	s.DeleteOtherSessions(u.ID, a.Token)
+	if s.SessionUser(a.Token) == nil {
+		t.Fatal("текущая сессия должна сохраниться")
+	}
+	if s.SessionUser(b.Token) != nil {
+		t.Fatal("другая сессия должна быть удалена")
+	}
+}

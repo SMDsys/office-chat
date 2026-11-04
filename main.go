@@ -24,7 +24,7 @@ import (
 //go:embed web
 var webFiles embed.FS
 
-var version = "1.3.0"
+var version = "1.4.0"
 
 type Config struct {
 	Port    int    `json:"port"`
@@ -56,6 +56,8 @@ func main() {
 	tlsOn := flag.Bool("tls", false, "включить HTTPS с самоподписанным сертификатом")
 	tlsCert := flag.String("tls-cert", "", "путь к сертификату (PEM), вместе с -tls-key")
 	tlsKey := flag.String("tls-key", "", "путь к ключу (PEM), вместе с -tls-cert")
+	restore := flag.String("restore", "", "восстановить данные из zip: -restore файл.zip")
+	force := flag.Bool("force", false, "перезаписать существующие данные при -restore")
 	flag.Parse()
 
 	if *showVersion {
@@ -108,6 +110,15 @@ func main() {
 	}
 	if cfg.TLSCert != "" && cfg.TLSKey != "" {
 		cfg.TLS = true
+	}
+
+	if *restore != "" {
+		if err := restoreBackup(cfg.DataDir, *restore, *force); err != nil {
+			fmt.Fprintln(os.Stderr, "Восстановление:", err)
+			os.Exit(1)
+		}
+		fmt.Println("Данные восстановлены из", *restore)
+		return
 	}
 
 	if *passwd != "" {
@@ -349,6 +360,10 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/logout", a.auth(a.handleLogout))
 	mux.HandleFunc("GET /api/me", a.auth(a.handleMe))
 	mux.HandleFunc("PATCH /api/me", a.auth(a.handleUpdateMe))
+	mux.HandleFunc("PATCH /api/me/status", a.auth(a.handleStatus))
+	mux.HandleFunc("POST /api/me/avatar", a.auth(a.handleAvatarUpload))
+	mux.HandleFunc("DELETE /api/me/avatar", a.auth(a.handleAvatarDelete))
+	mux.HandleFunc("GET /avatars/{file}", a.handleAvatarFile)
 	mux.HandleFunc("POST /api/me/password", a.auth(a.handleChangePassword))
 	mux.HandleFunc("GET /api/bootstrap", a.auth(a.handleBootstrap))
 
@@ -362,6 +377,8 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/chats", a.auth(a.handleCreateChannel))
 	mux.HandleFunc("PATCH /api/chats/{id}", a.auth(a.handleUpdateChannel))
 	mux.HandleFunc("DELETE /api/chats/{id}", a.auth(a.handleDeleteChannel))
+	mux.HandleFunc("POST /api/chats/{id}/members", a.auth(a.handleChannelMembers))
+	mux.HandleFunc("GET /api/chats/{id}/export", a.auth(a.handleExport))
 	mux.HandleFunc("POST /api/dm", a.auth(a.handleCreateDM))
 	mux.HandleFunc("POST /api/read", a.auth(a.handleRead))
 	mux.HandleFunc("POST /api/read/all", a.auth(a.handleReadAll))
@@ -374,6 +391,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/admin/users/{id}/reset", a.auth(a.handleAdminReset))
 	mux.HandleFunc("POST /api/admin/users/{id}/block", a.auth(a.handleAdminBlock))
 	mux.HandleFunc("GET /api/admin/audit", a.auth(a.handleAdminAudit))
+	mux.HandleFunc("POST /api/admin/users/{id}/admin", a.auth(a.handleAdminAdmin))
 
 	mux.Handle("/", staticHandler())
 	return a.middleware(mux)

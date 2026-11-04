@@ -44,6 +44,13 @@
   const dateFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' });
   const fullFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
+  function statusLabel(user) {
+    if (!user) return '';
+    if (user.status === 'dnd') return 'не беспокоить';
+    if (user.status === 'away') return 'отошёл';
+    return presenceText(user);
+  }
+
   function initials(name) {
     const parts = String(name || '?').trim().split(/\s+/).slice(0, 2);
     return parts.map(p => p[0] ? p[0].toUpperCase() : '').join('') || '?';
@@ -648,18 +655,39 @@
       case 'chat.new': {
         const c = ev.data;
         if (!c || !c.id) break;
-        if (c.isDm && !(c.members || []).includes(state.me.id)) break;
+        if ((c.isDm || c.private) && !(c.members || []).includes(state.me.id)) break;
         state.chats.set(c.id, c);
         renderChats();
         break;
       }
       case 'chat.update': {
         const c = ev.data;
+        if (c.private && !(c.members || []).includes(state.me.id)) {
+          state.chats.delete(c.id);
+          state.messages.delete(c.id);
+          renderChats();
+          if (state.activeChat === c.id) {
+            const next = state.chats.has('general') ? 'general' : [...state.chats.keys()][0];
+            if (next) openChat(next);
+          }
+          break;
+        }
         const old = state.chats.get(c.id);
         if (old) state.chats.set(c.id, { ...old, ...c });
         else state.chats.set(c.id, c);
         renderChats();
         if (state.activeChat === c.id) renderHeader();
+        break;
+      }
+      case 'chat.removed': {
+        const id = ev.data.chatId;
+        state.chats.delete(id);
+        state.messages.delete(id);
+        renderChats();
+        if (state.activeChat === id) {
+          const next = state.chats.has('general') ? 'general' : [...state.chats.keys()][0];
+          if (next) openChat(next);
+        }
         break;
       }
       case 'chat.deleted': {
@@ -715,6 +743,7 @@
     const mine = m.userId === state.me.id;
     const active = state.activeChat === m.chatId && document.visibilityState === 'visible';
     const mention = !mine && mentionsMe(m.text);
+    const quiet = state.me && state.me.status === 'dnd';
 
     if (active) {
       const atBottom = isAtBottom();
@@ -724,14 +753,46 @@
       state.unread.set(m.chatId, (state.unread.get(m.chatId) || 0) + 1);
       if (mention) {
         state.mentions.add(m.chatId);
-        playMention();
-      } else {
+        if (!quiet) playMention();
+      } else if (!quiet) {
         playPing();
       }
     }
-    if (!mine) notifyMessage(m, chat, mention);
+    if (!mine && !quiet) notifyMessage(m, chat, mention);
     renderChats();
   }
+
+  let lastActiveAt = Date.now();
+  ['mousemove', 'keydown', 'mousedown', 'touchstart'].forEach((ev) => {
+    window.addEventListener(ev, () => { lastActiveAt = Date.now(); }, { passive: true });
+  });
+
+  // setStatus меняет ручной статус; при бездействии 10 минут включается «отошёл».
+  function setStatus(next, silent) {
+    if (!state.me) return;
+    if ((state.me.status || '') === next) return;
+    state.me = { ...state.me, status: next };
+    state.users.set(state.me.id, { ...(state.users.get(state.me.id) || {}), status: next });
+    renderMe();
+    renderMembers();
+    renderChats();
+    api('/api/me/status', { method: 'PATCH', body: { status: next } }).then((d) => {
+      if (d && d.user) {
+        state.me = { ...state.me, ...d.user };
+        state.users.set(state.me.id, { ...(state.users.get(state.me.id) || {}), ...d.user });
+        renderMe();
+        renderMembers();
+      }
+    }).catch(() => {});
+    if (!silent) toast(next === 'dnd' ? 'Не беспокоить' : next === 'away' ? 'Статус: отошёл' : 'Статус: в сети');
+  }
+
+  setInterval(() => {
+    if (!state.me) return;
+    const idle = Date.now() - lastActiveAt > 10 * 60 * 1000;
+    if (idle && !state.me.status) setStatus('away', true);
+    else if (!idle && state.me.status === 'away') setStatus('', true);
+  }, 60000);
 
   function onUpdated(m) {
     const list = state.messages.get(m.chatId);
@@ -782,7 +843,7 @@
     if (chat.isDm) {
       const other = chat.dmUser || dmPartner(chat);
       if (!other) return '';
-      return state.online.has(other.id) ? 'в сети' : presenceText(other);
+      return statusLabel(other);
     }
     return chat.topic || '';
   }
@@ -843,7 +904,7 @@
       const other = chat.dmUser || dmPartner(chat);
       node.append(avatarEl(other || { name: '?', color: '#555' }, other && state.online.has(other.id), 28));
     } else {
-      node.append(el('span', { class: 'glyph' }, icon('hash')));
+      node.append(el('span', { class: 'glyph' }, icon(chat.private ? 'lock' : 'hash')));
     }
 
     node.append(el('span', { class: 'chat-meta' },
@@ -875,7 +936,9 @@
     $('#chatTopic').textContent = chatSubtitle(chat);
     const glyph = $('#chatGlyph');
     glyph.textContent = '';
-    glyph.append(icon(chat.isDm ? 'at' : 'hash'));
+    glyph.append(icon(chat.isDm ? 'at' : chat.private ? 'lock' : 'hash'));
+    const menuBtn = $('#chatMenuBtn');
+    if (menuBtn) menuBtn.hidden = !!chat.isDm;
     renderTyping();
   }
 
@@ -903,7 +966,7 @@
     const chat = state.chats.get(state.activeChat);
     box.textContent = '';
     let users = [...state.users.values()].filter(u => !u.blocked);
-    if (chat && chat.isDm) {
+    if (chat && (chat.isDm || chat.private)) {
       users = users.filter(u => (chat.members || []).includes(u.id));
     }
     users.sort((a, b) => {
@@ -927,7 +990,7 @@
         avatarEl(u, online, 27),
         el('span', { class: 'm-text' },
           el('strong', {}, u.name + (u.id === state.me.id ? ' (вы)' : '')),
-          el('small', {}, online ? 'в сети' : presenceText(u))));
+          el('small', {}, statusLabel(u))));
       box.append(node);
     }
   }
@@ -1702,22 +1765,37 @@
   $('#meBox').addEventListener('click', openProfile);
 
   function avatarEl(user, online, size) {
-    const node = el('span', { class: 'avatar' + (online ? ' is-online' : ''), title: user.name || '' });
-    node.style.background = user.color || '#6b7280';
+    const status = online ? (user.status || '') : '';
+    const cls = 'avatar' + (online ? ' is-online' : '') +
+      (status === 'away' ? ' is-away' : status === 'dnd' ? ' is-dnd' : '');
+    const node = el('span', { class: cls, title: user.name || '' });
     node.style.width = size + 'px';
     node.style.height = size + 'px';
     node.style.fontSize = Math.max(9, Math.round(size * 0.36)) + 'px';
-    node.textContent = initials(user.name);
+    if (user.avatar) {
+      node.style.background = 'transparent';
+      node.append(el('img', { src: '/avatars/' + encodeURIComponent(user.avatar), alt: '', loading: 'lazy' }));
+    } else {
+      node.style.background = user.color || '#6b7280';
+      node.textContent = initials(user.name);
+    }
     return node;
   }
 
   function renderMe() {
     if (!state.me) return;
     const av = $('#meAvatar');
-    av.style.background = state.me.color || '#6b7280';
-    av.textContent = initials(state.me.name);
+    av.textContent = '';
+    if (state.me.avatar) {
+      av.style.background = 'transparent';
+      av.append(el('img', { src: '/avatars/' + encodeURIComponent(state.me.avatar), alt: '' }));
+    } else {
+      av.style.background = state.me.color || '#6b7280';
+      av.textContent = initials(state.me.name);
+    }
     $('#meName').textContent = state.me.name;
-    $('#meStatus').textContent = state.me.isAdmin ? 'администратор' : 'в сети';
+    const label = state.me.status === 'dnd' ? 'не беспокоить' : state.me.status === 'away' ? 'отошёл' : 'в сети';
+    $('#meStatus').textContent = state.me.isAdmin ? 'администратор · ' + label : label;
   }
 
   function openProfile() {
@@ -1790,12 +1868,64 @@
       },
     });
 
+    const avatarInput = el('input', {
+      type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', hidden: '',
+    });
+    avatarInput.addEventListener('change', async () => {
+      const f = avatarInput.files && avatarInput.files[0];
+      if (!f) return;
+      if (f.size > 2 * 1024 * 1024) { toast('Фото больше 2 МБ', 'error'); avatarInput.value = ''; return; }
+      const fd = new FormData();
+      fd.append('file', f);
+      try {
+        const data = await api('/api/me/avatar', { method: 'POST', form: fd });
+        state.me = { ...state.me, ...data.user };
+        state.users.set(state.me.id, { ...(state.users.get(state.me.id) || {}), ...data.user });
+        renderMe(); renderMembers(); renderChats();
+        toast('Фото обновлено');
+        modal.close();
+        openProfile();
+      } catch (ex) { toast(ex.message, 'error'); }
+      avatarInput.value = '';
+    });
+
+    const statusRow = el('div', { class: 'status-row' });
+    const drawStatus = () => {
+      statusRow.textContent = '';
+      for (const [label, value] of [['В сети', ''], ['Отошёл', 'away'], ['Не беспокоить', 'dnd']]) {
+        statusRow.append(el('button', {
+          class: 'chip' + ((state.me.status || '') === value ? ' is-on' : ''),
+          onclick: () => { setStatus(value); drawStatus(); },
+        }, label));
+      }
+    };
+    drawStatus();
+
     const body = [
       el('div', { class: 'profile-top' },
         avatarEl(me, true, 54),
         el('div', {},
           el('h3', {}, me.name),
           el('p', {}, '@' + me.login + (me.isAdmin ? ' · администратор' : '')))),
+      el('div', { class: 'avatar-actions' },
+        el('button', { class: 'btn', onclick: () => avatarInput.click() },
+          icon('image'), me.avatar ? 'Сменить фото' : 'Загрузить фото'),
+        me.avatar ? el('button', {
+          class: 'btn btn-ghost', onclick: async () => {
+            try {
+              const data = await api('/api/me/avatar', { method: 'DELETE' });
+              state.me = { ...state.me, ...data.user };
+              state.users.set(state.me.id, { ...(state.users.get(state.me.id) || {}), ...data.user });
+              renderMe(); renderMembers(); renderChats();
+              toast('Фото удалено');
+              modal.close();
+              openProfile();
+            } catch (ex) { toast(ex.message, 'error'); }
+          },
+        }, 'Удалить фото') : null,
+        avatarInput),
+      el('div', { class: 'section-label' }, 'Статус'),
+      statusRow,
       el('div', { class: 'section-label' }, 'Имя и цвет'),
       el('label', { class: 'field' }, el('span', {}, 'Отображаемое имя'), nameInput),
       colorBox,
@@ -1857,6 +1987,32 @@
         const actions = el('div', { class: 'a-actions' });
         if (u.id !== state.me.id) {
           actions.append(el('button', {
+            class: 'icon-btn',
+            title: u.isAdmin ? 'Снять права администратора' : 'Сделать администратором',
+            'aria-label': 'Права администратора',
+            onclick: async () => {
+              const ok = await confirmDialog({
+                title: u.isAdmin ? 'Снять права администратора?' : 'Назначить администратором?',
+                text: u.isAdmin
+                  ? `«${u.name}» больше не сможет управлять сотрудниками и каналами.`
+                  : `«${u.name}» сможет сбрасывать пароли, блокировать сотрудников и управлять каналами.`,
+                confirm: u.isAdmin ? 'Снять' : 'Назначить',
+              });
+              if (!ok) return;
+              try {
+                const data = await api(`/api/admin/users/${encodeURIComponent(u.id)}/admin`, {
+                  method: 'POST', body: { admin: !u.isAdmin },
+                });
+                Object.assign(u, data.user);
+                state.users.set(u.id, { ...(state.users.get(u.id) || {}), ...data.user });
+                render();
+                renderMembers();
+                loadAudit();
+                toast(u.isAdmin ? 'Права администратора выданы' : 'Права администратора сняты');
+              } catch (ex) { toast(ex.message, 'error'); }
+            },
+          }, icon('shield')));
+          actions.append(el('button', {
             class: 'icon-btn', title: 'Сбросить пароль', 'aria-label': 'Сбросить пароль',
             onclick: async () => {
               const ok = await confirmDialog({
@@ -1901,21 +2057,27 @@
         case 'block': return `${e.actor} заблокировал ${e.target}`;
         case 'unblock': return `${e.actor} разблокировал ${e.target}`;
         case 'register': return `${e.actor} зарегистрировался`;
+        case 'grant_admin': return `${e.actor} назначил ${e.target} администратором`;
+        case 'revoke_admin': return `${e.actor} снял права администратора с ${e.target}`;
+        case 'channel_members': return `${e.actor} изменил участников канала «${e.target}» ${e.detail || ''}`.trim();
         default: return `${e.actor}: ${e.action}${e.target ? ' ' + e.target : ''}`;
       }
     };
-    api('/api/admin/audit').then((data) => {
-      auditBox.textContent = '';
-      if (!data.entries || !data.entries.length) {
-        auditBox.append(el('p', { class: 'modal-text' }, 'Пока пусто'));
-        return;
-      }
-      for (const e of data.entries) {
-        auditBox.append(el('div', { class: 'audit-row' },
-          el('span', { class: 'audit-time' }, fmtDateTime(e.at)),
-          el('span', { class: 'audit-text' }, auditText(e))));
-      }
-    }).catch(() => { auditBox.textContent = 'Не удалось загрузить журнал'; });
+    function loadAudit() {
+      api('/api/admin/audit').then((data) => {
+        auditBox.textContent = '';
+        if (!data.entries || !data.entries.length) {
+          auditBox.append(el('p', { class: 'modal-text' }, 'Пока пусто'));
+          return;
+        }
+        for (const e of data.entries) {
+          auditBox.append(el('div', { class: 'audit-row' },
+            el('span', { class: 'audit-time' }, fmtDateTime(e.at)),
+            el('span', { class: 'audit-text' }, auditText(e))));
+        }
+      }).catch(() => { auditBox.textContent = 'Не удалось загрузить журнал'; });
+    }
+    loadAudit();
 
     openModal({
       title: 'Сотрудники',
@@ -1957,18 +2119,58 @@
   function openChannelModal() {
     const name = el('input', { placeholder: 'Например: Склад', maxlength: '40' });
     const topic = el('input', { placeholder: 'Коротко о чём канал (необязательно)', maxlength: '160' });
+    let isPrivate = false;
+    const chosen = new Set();
+
+    const membersBox = el('div', { class: 'pick-list', hidden: '' });
+    const users = [...state.users.values()].filter(u => u.id !== state.me.id && !u.blocked)
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    for (const u of users) {
+      membersBox.append(el('label', { class: 'pick-row' },
+        el('input', {
+          type: 'checkbox',
+          onchange: (e) => { if (e.target.checked) chosen.add(u.id); else chosen.delete(u.id); },
+        }),
+        avatarEl(u, state.online.has(u.id), 26),
+        el('span', {}, u.name)));
+    }
+
+    const hint = el('p', { class: 'form-hint' }, 'Канал увидят все сотрудники. Писать в нём сможет любой.');
+    const privateSwitch = el('button', {
+      class: 'switch',
+      'aria-label': 'Закрытый канал',
+      onclick: (e) => {
+        isPrivate = !isPrivate;
+        e.currentTarget.classList.toggle('is-on', isPrivate);
+        membersBox.hidden = !isPrivate;
+        hint.textContent = isPrivate
+          ? 'Канал увидят только выбранные сотрудники. Добавлять и убирать участников может создатель.'
+          : 'Канал увидят все сотрудники. Писать в нём сможет любой.';
+      },
+    });
+
     const modal = openModal({
       title: 'Новый канал',
       body: [
         el('label', { class: 'field' }, el('span', {}, 'Название'), name),
         el('label', { class: 'field' }, el('span', {}, 'Описание'), topic),
-        el('p', { class: 'form-hint' }, 'Канал увидят все сотрудники. Писать в нём сможет любой.'),
+        el('div', { class: 'toggle-row' }, el('span', {}, 'Закрытый канал'), privateSwitch),
+        membersBox,
+        hint,
       ],
       footer: [
         el('button', { class: 'btn btn-ghost', onclick: () => modal.close() }, 'Отмена'),
         el('button', { class: 'btn btn-primary', onclick: async () => {
           try {
-            const data = await api('/api/chats', { method: 'POST', body: { name: name.value.trim(), topic: topic.value.trim() } });
+            const data = await api('/api/chats', {
+              method: 'POST',
+              body: {
+                name: name.value.trim(),
+                topic: topic.value.trim(),
+                private: isPrivate,
+                members: [...chosen],
+              },
+            });
             const chat = { ...data.chat, unread: 0, lastMessage: null };
             state.chats.set(chat.id, chat);
             renderChats();
@@ -1979,6 +2181,140 @@
         } }, 'Создать'),
       ],
     });
+  }
+
+  function openChannelInfo() {
+    const chat = state.chats.get(state.activeChat);
+    if (!chat || chat.isDm) return;
+    const canManage = chat.createdBy === state.me.id || state.me.isAdmin;
+    const name = el('input', { value: chat.name || '', maxlength: '40', disabled: !canManage });
+    const topic = el('input', { value: chat.topic || '', maxlength: '160', disabled: !canManage });
+    const membersBox = el('div', { class: 'admin-list' });
+    const addBox = el('div', { class: 'pick-list' });
+
+    const drawMembers = () => {
+      membersBox.textContent = '';
+      const ids = chat.private ? (chat.members || []) : [];
+      for (const id of ids) {
+        const u = state.users.get(id);
+        if (!u) continue;
+        const actions = el('div', { class: 'a-actions' });
+        if (canManage && id !== chat.createdBy) {
+          actions.append(el('button', {
+            class: 'icon-btn', title: 'Убрать из канала', 'aria-label': 'Убрать из канала',
+            onclick: async () => {
+              try {
+                const data = await api(`/api/chats/${encodeURIComponent(chat.id)}/members`, {
+                  method: 'POST', body: { remove: [id] },
+                });
+                chat.members = data.chat.members;
+                state.chats.set(chat.id, { ...chat });
+                drawMembers();
+                renderMembers();
+                toast('Участник убран');
+              } catch (ex) { toast(ex.message, 'error'); }
+            },
+          }, icon('x')));
+        }
+        membersBox.append(el('div', { class: 'admin-row' },
+          avatarEl(u, state.online.has(u.id), 28),
+          el('span', { class: 'a-text' },
+            el('strong', {}, u.name + (id === chat.createdBy ? ' · создатель' : '')),
+            el('small', {}, '@' + u.login)),
+          actions));
+      }
+    };
+
+    const drawAdd = () => {
+      addBox.textContent = '';
+      const candidates = [...state.users.values()]
+        .filter(u => !u.blocked && !(chat.members || []).includes(u.id))
+        .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+      if (!candidates.length) return;
+      const select = el('select', {});
+      for (const u of candidates) select.append(el('option', { value: u.id }, u.name));
+      addBox.append(el('div', { class: 'pick-add' },
+        select,
+        el('button', {
+          class: 'btn', onclick: async () => {
+            try {
+              const data = await api(`/api/chats/${encodeURIComponent(chat.id)}/members`, {
+                method: 'POST', body: { add: [select.value] },
+              });
+              chat.members = data.chat.members;
+              state.chats.set(chat.id, { ...chat });
+              drawMembers(); drawAdd(); renderMembers();
+              toast('Участник добавлен');
+            } catch (ex) { toast(ex.message, 'error'); }
+          },
+        }, 'Добавить')));
+    };
+
+    const body = [
+      el('p', { class: 'modal-text' }, chat.private
+        ? 'Закрытый канал: его видят только участники.'
+        : 'Открытый канал: его видят все сотрудники.'),
+      el('label', { class: 'field' }, el('span', {}, 'Название'), name),
+      el('label', { class: 'field' }, el('span', {}, 'Описание'), topic),
+    ];
+    if (canManage) {
+      body.push(el('button', {
+        class: 'btn', onclick: async () => {
+          try {
+            const data = await api(`/api/chats/${encodeURIComponent(chat.id)}`, {
+              method: 'PATCH', body: { name: name.value.trim(), topic: topic.value.trim() },
+            });
+            Object.assign(chat, data.chat || {});
+            state.chats.set(chat.id, { ...chat });
+            renderChats(); renderHeader();
+            toast('Канал сохранён');
+          } catch (ex) { toast(ex.message, 'error'); }
+        },
+      }, 'Сохранить название и описание'));
+    }
+    if (chat.private) {
+      drawMembers();
+      drawAdd();
+      body.push(el('h3', { class: 'modal-sub' }, 'Участники'), membersBox);
+      if (canManage) body.push(addBox);
+    }
+    body.push(el('h3', { class: 'modal-sub' }, 'Экспорт'));
+    body.push(el('div', { class: 'export-row' },
+      el('button', {
+        class: 'btn', onclick: () => downloadExport(chat.id, 'html'),
+      }, icon('down'), 'HTML для чтения'),
+      el('button', {
+        class: 'btn', onclick: () => downloadExport(chat.id, 'json'),
+      }, icon('down'), 'JSON для архива')));
+
+    const footer = [el('button', { class: 'btn btn-primary', onclick: () => modal.close() }, 'Закрыть')];
+    if (canManage) {
+      footer.unshift(el('button', {
+        class: 'btn btn-ghost danger', onclick: async () => {
+          const ok = await confirmDialog({
+            title: 'Удалить канал?',
+            text: `Канал «${chat.name}» и вся его переписка будут удалены без возможности отмены.`,
+            confirm: 'Удалить',
+          });
+          if (!ok) return;
+          try {
+            await api(`/api/chats/${encodeURIComponent(chat.id)}`, { method: 'DELETE' });
+            modal.close();
+            toast('Канал удалён');
+          } catch (ex) { toast(ex.message, 'error'); }
+        },
+      }, icon('trash'), 'Удалить канал'));
+    }
+    const modal = openModal({ title: 'Канал', wide: true, body, footer });
+  }
+
+  function downloadExport(chatId, format) {
+    const a = document.createElement('a');
+    a.href = `/api/chats/${encodeURIComponent(chatId)}/export?format=${format}`;
+    a.download = '';
+    document.body.append(a);
+    a.click();
+    a.remove();
   }
 
   function openNewDmModal() {
@@ -2110,6 +2446,8 @@
     state.filter = e.target.value;
     renderChats();
   });
+
+  $('#chatMenuBtn').addEventListener('click', openChannelInfo);
 
   $('#sideToggle').addEventListener('click', () => {
     const side = $('#side');

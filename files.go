@@ -135,11 +135,22 @@ func (a *App) handleFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	disposition := "attachment"
-	if strings.HasPrefix(meta.Mime, "image/") || meta.Mime == "application/pdf" || strings.HasPrefix(meta.Mime, "text/") {
+	if inlineSafe(meta.Mime) {
 		disposition = "inline"
 	}
 	w.Header().Set("Content-Disposition", disposition+`; filename="`+asciiFallback(meta.Name)+`"; filename*=UTF-8''`+url.PathEscape(meta.Name))
 	http.ServeContent(w, r, meta.Name, meta.CreatedAt, f)
+}
+
+// inlineSafe перечисляет типы, которые безопасно показывать в браузере.
+// HTML, SVG и прочие text/* отдаются только на скачивание: иначе загруженный
+// файл выполнил бы свой скрипт от имени чата.
+func inlineSafe(mimeType string) bool {
+	switch strings.ToLower(strings.TrimSpace(strings.Split(mimeType, ";")[0])) {
+	case "image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "application/pdf":
+		return true
+	}
+	return false
 }
 
 func asciiFallback(name string) string {

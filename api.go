@@ -236,7 +236,32 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request, u *Us
 		x.Salt = salt
 		x.PassHash = hash
 	})
+	a.store.DeleteOtherSessions(u.ID, sessionToken(r))
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// handleStatus меняет ручной статус: активен, отошёл или не беспокоить.
+func (a *App) handleStatus(w http.ResponseWriter, r *http.Request, u *User) {
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	switch req.Status {
+	case "", "away", "dnd":
+	default:
+		writeErr(w, 400, "недопустимый статус")
+		return
+	}
+	updated, ok := a.store.UpdateUser(u.ID, func(x *User) { x.Status = req.Status })
+	if !ok {
+		writeErr(w, 404, "пользователь не найден")
+		return
+	}
+	a.hub.Broadcast(Event{Type: "user.update", Data: updated.Public(a.hub.IsOnline(u.ID))})
+	writeJSON(w, 200, map[string]any{"user": updated.Public(a.hub.IsOnline(u.ID))})
 }
 
 func validColor(c string) bool {
@@ -327,6 +352,10 @@ func (a *App) handleMessages(w http.ResponseWriter, r *http.Request, u *User) {
 }
 
 func (a *App) handleSendMessage(w http.ResponseWriter, r *http.Request, u *User) {
+	if !a.limiter.Allow("msg:"+u.ID, 30, 10*time.Second) {
+		writeErr(w, http.StatusTooManyRequests, "слишком часто, подождите немного")
+		return
+	}
 	var req struct {
 		ChatID  string   `json:"chatId"`
 		Text    string   `json:"text"`
@@ -532,20 +561,62 @@ func (a *App) handlePin(w http.ResponseWriter, r *http.Request, u *User) {
 
 func (a *App) handleCreateChannel(w http.ResponseWriter, r *http.Request, u *User) {
 	var req struct {
-		Name  string `json:"name"`
-		Topic string `json:"topic"`
+		Name    string   `json:"name"`
+		Topic   string   `json:"topic"`
+		Private bool     `json:"private"`
+		Members []string `json:"members"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	ch, err := a.store.CreateChannel(req.Name, req.Topic, u.ID)
+	ch, err := a.store.CreateChannelWith(req.Name, req.Topic, u.ID, req.Private, req.Members)
 	if err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	a.hub.Broadcast(Event{Type: "chat.new", Data: chatView{Channel: *ch}})
+	ev := Event{Type: "chat.new", Data: chatView{Channel: *ch}}
+	if ch.Private {
+		a.hub.Publish(ev, func(uid string) bool { return contains(ch.Members, uid) })
+	} else {
+		a.hub.Broadcast(ev)
+	}
 	writeJSON(w, 200, map[string]any{"chat": ch})
+}
+
+// handleChannelMembers меняет состав закрытого канала.
+func (a *App) handleChannelMembers(w http.ResponseWriter, r *http.Request, u *User) {
+	id := r.PathValue("id")
+	ch := a.store.Channel(id)
+	if ch == nil || ch.IsDM {
+		writeErr(w, 404, "канал не найден")
+		return
+	}
+	if ch.CreatedBy != u.ID && !u.IsAdmin {
+		writeErr(w, 403, "менять участников может только создатель канала")
+		return
+	}
+	var req struct {
+		Add    []string `json:"add"`
+		Remove []string `json:"remove"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	updated, err := a.store.UpdateChannelMembers(id, req.Add, req.Remove)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	a.hub.Publish(Event{Type: "chat.update", Data: chatView{Channel: *updated}},
+		func(uid string) bool { return contains(updated.Members, uid) })
+	for _, uid := range req.Remove {
+		a.hub.Publish(Event{Type: "chat.removed", Data: map[string]string{"chatId": id}},
+			func(x string) bool { return x == uid })
+	}
+	a.store.Audit(u.Login, "channel_members", updated.Name, fmt.Sprintf("+%d -%d", len(req.Add), len(req.Remove)))
+	writeJSON(w, 200, map[string]any{"chat": updated})
 }
 
 func (a *App) handleUpdateChannel(w http.ResponseWriter, r *http.Request, u *User) {
@@ -771,6 +842,53 @@ func (a *App) handleAdminBlock(w http.ResponseWriter, r *http.Request, u *User) 
 	a.store.Audit(u.Login, action, target.Login, "")
 	a.hub.Broadcast(Event{Type: "user.update", Data: target.Public(false)})
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+func (a *App) handleAdminAdmin(w http.ResponseWriter, r *http.Request, u *User) {
+	if !a.requireAdmin(w, u) {
+		return
+	}
+	id := r.PathValue("id")
+	if id == u.ID {
+		writeErr(w, 400, "нельзя менять свои права")
+		return
+	}
+	var req struct {
+		Admin bool `json:"admin"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	target := a.store.User(id)
+	if target == nil {
+		writeErr(w, 404, "пользователь не найден")
+		return
+	}
+	if !req.Admin && target.IsAdmin {
+		admins := 0
+		for _, x := range a.store.Users() {
+			if x.IsAdmin {
+				admins++
+			}
+		}
+		if admins <= 1 {
+			writeErr(w, 400, "в чате должен остаться хотя бы один администратор")
+			return
+		}
+	}
+	updated, ok := a.store.UpdateUser(id, func(x *User) { x.IsAdmin = req.Admin })
+	if !ok {
+		writeErr(w, 404, "пользователь не найден")
+		return
+	}
+	action := "revoke_admin"
+	if req.Admin {
+		action = "grant_admin"
+	}
+	a.store.Audit(u.Login, action, updated.Login, "")
+	a.hub.Broadcast(Event{Type: "user.update", Data: updated.Public(a.hub.IsOnline(id))})
+	writeJSON(w, 200, map[string]any{"user": updated.Public(a.hub.IsOnline(id))})
 }
 
 func (a *App) handleAdminAudit(w http.ResponseWriter, r *http.Request, u *User) {

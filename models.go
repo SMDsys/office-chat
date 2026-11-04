@@ -21,6 +21,8 @@ type User struct {
 	CreatedAt time.Time            `json:"createdAt"`
 	LastSeen  time.Time            `json:"lastSeen"`
 	Reads     map[string]time.Time `json:"reads,omitempty"`
+	Avatar    string               `json:"avatar,omitempty"`
+	Status    string               `json:"status,omitempty"` // "" — активен, "away", "dnd"
 }
 
 // PublicUser — то, что можно отдавать клиенту (без хэша пароля).
@@ -33,6 +35,8 @@ type PublicUser struct {
 	Blocked  bool      `json:"blocked"`
 	Online   bool      `json:"online"`
 	LastSeen time.Time `json:"lastSeen"`
+	Avatar   string    `json:"avatar,omitempty"`
+	Status   string    `json:"status,omitempty"`
 }
 
 func (u *User) Public(online bool) PublicUser {
@@ -45,6 +49,8 @@ func (u *User) Public(online bool) PublicUser {
 		Blocked:  u.Blocked,
 		Online:   online,
 		LastSeen: u.LastSeen,
+		Avatar:   u.Avatar,
+		Status:   u.Status,
 	}
 }
 
@@ -55,7 +61,8 @@ type Channel struct {
 	Name      string    `json:"name"`
 	Topic     string    `json:"topic"`
 	IsDM      bool      `json:"isDm"`
-	Members   []string  `json:"members,omitempty"` // только для DM
+	Private   bool      `json:"private,omitempty"` // закрытый канал: доступ только участникам
+	Members   []string  `json:"members,omitempty"` // DM и закрытые каналы
 	CreatedBy string    `json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
 }
