@@ -788,12 +788,12 @@ func (s *Store) Search(userID, q, chatID string, limit int) []*Message {
 	}
 	chatIDs := []string{}
 	if chatID != "" {
-		if c := s.channels[chatID]; c != nil && (!c.IsDM || contains(c.Members, userID)) {
+		if c := s.channels[chatID]; c != nil && ((!c.IsDM && !c.Private) || contains(c.Members, userID)) {
 			chatIDs = append(chatIDs, chatID)
 		}
 	} else {
 		for id, c := range s.channels {
-			if !c.IsDM || contains(c.Members, userID) {
+			if (!c.IsDM && !c.Private) || contains(c.Members, userID) {
 				chatIDs = append(chatIDs, id)
 			}
 		}

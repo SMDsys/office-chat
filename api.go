@@ -324,7 +324,7 @@ func (a *App) handleBootstrap(w http.ResponseWriter, r *http.Request, u *User) {
 
 func (a *App) chatAllow(chatID string) func(string) bool {
 	ch := a.store.Channel(chatID)
-	if ch == nil || !ch.IsDM {
+	if ch == nil || (!ch.IsDM && !ch.Private) {
 		return nil
 	}
 	members := ch.Members
@@ -652,7 +652,12 @@ func (a *App) handleUpdateChannel(w http.ResponseWriter, r *http.Request, u *Use
 		c.Name = name
 		c.Topic = topic
 	})
-	a.hub.Broadcast(Event{Type: "chat.update", Data: updated})
+	if updated.Private {
+		a.hub.Publish(Event{Type: "chat.update", Data: updated},
+			func(uid string) bool { return contains(updated.Members, uid) })
+	} else {
+		a.hub.Broadcast(Event{Type: "chat.update", Data: updated})
+	}
 	writeJSON(w, 200, map[string]any{"chat": updated})
 }
 
@@ -671,7 +676,13 @@ func (a *App) handleDeleteChannel(w http.ResponseWriter, r *http.Request, u *Use
 		writeErr(w, 400, err.Error())
 		return
 	}
-	a.hub.Broadcast(Event{Type: "chat.deleted", Data: map[string]string{"chatId": id}})
+	del := Event{Type: "chat.deleted", Data: map[string]string{"chatId": id}}
+	if ch.Private {
+		members := ch.Members
+		a.hub.Publish(del, func(uid string) bool { return contains(members, uid) })
+	} else {
+		a.hub.Broadcast(del)
+	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

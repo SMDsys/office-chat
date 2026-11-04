@@ -232,3 +232,25 @@ func TestDeleteOtherSessions(t *testing.T) {
 		t.Fatal("другая сессия должна быть удалена")
 	}
 }
+
+func TestPrivateChannelSearchHidden(t *testing.T) {
+	s := testStore(t)
+	u1, _ := s.CreateUser("user1", "Первый", "hash", "salt")
+	u2, _ := s.CreateUser("user2", "Второй", "hash", "salt")
+	u3, _ := s.CreateUser("user3", "Третий", "hash", "salt")
+	ch, err := s.CreateChannelWith("Секреты", "", u1.ID, true, []string{u2.ID})
+	if err != nil {
+		t.Fatalf("CreateChannelWith: %v", err)
+	}
+	s.AddMessage(&Message{ID: "m1", ChatID: ch.ID, UserID: u1.ID, Text: "секретный текст", CreatedAt: time.Now()})
+
+	for _, m := range s.Search(u3.ID, "секретный", "", 100) {
+		t.Fatalf("посторонний нашёл сообщение закрытого канала: %q", m.Text)
+	}
+	if got := s.Search(u3.ID, "секретный", ch.ID, 100); len(got) != 0 {
+		t.Fatalf("поиск по закрытому каналу вернул %d сообщений постороннему", len(got))
+	}
+	if got := s.Search(u2.ID, "секретный", "", 100); len(got) != 1 {
+		t.Fatalf("участник должен найти сообщение, найдено %d", len(got))
+	}
+}
