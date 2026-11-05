@@ -21,7 +21,15 @@ echo.
 echo   Запуск без службы — окно должно оставаться открытым.
 echo   Остановить сервер: Ctrl+C или закрыть это окно.
 echo.
-echo   Адрес: http://localhost:%PORT%
+set "TLSVAL="
+if exist "%~dp0config.json" (
+  for /f "tokens=2 delims=:," %%a in ('findstr /i /c:"tls" "%~dp0config.json" 2^>nul') do set "TLSVAL=%%a"
+)
+if defined TLSVAL set "TLSVAL=%TLSVAL: =%"
+set "SCHEME=http"
+if /i "%TLSVAL%"=="true" set "SCHEME=https"
+
+echo   Адрес: %SCHEME%://localhost:%PORT%
 echo.
 
 "%~dp0OfficeChat.exe"

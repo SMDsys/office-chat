@@ -338,9 +338,12 @@
     });
   }
 
+  function nativeNotifyReady() {
+    return 'Notification' in window && window.isSecureContext && Notification.permission === 'granted';
+  }
+
   function notifyMessage(m, chat, mention) {
-    if (!state.notify || !('Notification' in window)) return;
-    if (Notification.permission !== 'granted') return;
+    if (!state.notify) return;
     if (document.visibilityState === 'visible' && document.hasFocus()) return;
     const author = state.users.get(m.userId);
     const title = chat.isDm
@@ -348,6 +351,10 @@
       : `${chatTitle(chat)}${author ? ' · ' + author.name : ''}`;
     let body = m.text || (m.files && m.files.length ? '📎 ' + m.files[0].name : 'Новое сообщение');
     if (body.length > 180) body = body.slice(0, 177) + '…';
+    if (!nativeNotifyReady()) {
+      toast(`${title}: ${body}`, 'ok', 7000);
+      return;
+    }
     try {
       const n = new Notification(title, {
         body,
@@ -1851,19 +1858,24 @@
           e.currentTarget.classList.remove('is-on');
           return;
         }
-        if (!('Notification' in window)) {
-          toast('Браузер не поддерживает уведомления', 'error');
+        const enable = () => {
+          state.notify = true;
+          localStorage.setItem('oc-notify', '1');
+          e.currentTarget.classList.add('is-on');
+        };
+        if (!('Notification' in window) || !window.isSecureContext) {
+          enable();
+          toast('Включил уведомления внутри чата. Системные всплывашки работают только по HTTPS.', 'ok', 6000);
           return;
         }
         let perm = Notification.permission;
         if (perm === 'default') perm = await Notification.requestPermission();
         if (perm !== 'granted') {
-          toast('Браузер запретил уведомления — разрешите их в настройках сайта', 'error');
+          enable();
+          toast('Браузер не дал системные уведомления — включил их внутри вкладки.', 'error', 6000);
           return;
         }
-        state.notify = true;
-        localStorage.setItem('oc-notify', '1');
-        e.currentTarget.classList.add('is-on');
+        enable();
         toast('Уведомления включены');
       },
     });
@@ -1945,7 +1957,9 @@
       el('div', { class: 'toggle-row' }, el('span', {}, 'Звук новых сообщений'), soundSwitch),
       el('div', { class: 'toggle-row' }, el('span', {}, 'Светлая тема'), themeSwitch),
       el('div', { class: 'toggle-row' }, el('span', {}, 'Уведомления на рабочем столе'), notifySwitch),
-      el('p', { class: 'form-hint' }, 'Уведомления показываются, когда вкладка свёрнута или окно не в фокусе.'),
+      el('p', { class: 'form-hint' }, window.isSecureContext
+        ? 'Уведомления показываются, когда вкладка свёрнута или окно не в фокусе.'
+        : 'Системные уведомления браузер даёт только по HTTPS. Пока включены уведомления внутри вкладки и счётчик в заголовке.'),
     ];
 
     if (me.isAdmin) {

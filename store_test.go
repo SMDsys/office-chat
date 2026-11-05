@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"io"
 	"log"
 	"os"
@@ -252,5 +253,19 @@ func TestPrivateChannelSearchHidden(t *testing.T) {
 	}
 	if got := s.Search(u2.ID, "секретный", "", 100); len(got) != 1 {
 		t.Fatalf("участник должен найти сообщение, найдено %d", len(got))
+	}
+}
+
+func TestSelfSignedCoversLocalAddresses(t *testing.T) {
+	certPEM, keyPEM, err := selfSignedPEM()
+	if err != nil {
+		t.Fatalf("selfSignedPEM: %v", err)
+	}
+	c, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatalf("X509KeyPair: %v", err)
+	}
+	if !certUsable(c) {
+		t.Fatal("свежий сертификат должен покрывать localhost и текущие IP")
 	}
 }

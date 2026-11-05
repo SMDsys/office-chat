@@ -66,7 +66,8 @@ jobs:
         run: |
           go build -trimpath -ldflags "-s -w" -o dist/OfficeChat.exe .
           cp packaging/config.json packaging/install.bat packaging/uninstall.bat \
-             packaging/run.bat "packaging/Подключиться.bat" packaging/README.txt dist/
+             packaging/run.bat "packaging/Подключиться.bat" "packaging/Включить HTTPS.bat" \
+             packaging/README.txt dist/
           cd dist
           VERSION="${GITHUB_REF_NAME#v}"
           zip -r "../OfficeChat-${VERSION}-win64.zip" .

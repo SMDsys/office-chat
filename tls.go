@@ -55,18 +55,26 @@ func certUsable(c tls.Certificate) bool {
 	if err != nil {
 		return false
 	}
-	return time.Now().Add(30 * 24 * time.Hour).Before(leaf.NotAfter)
+	if !time.Now().Add(30 * 24 * time.Hour).Before(leaf.NotAfter) {
+		return false
+	}
+	// Адреса компьютера могли измениться (DHCP): тогда сертификат нужно
+	// пересоздать, иначе браузер ругается на несовпадение имени.
+	dns, ips := certHosts()
+	for _, h := range dns {
+		if leaf.VerifyHostname(h) != nil {
+			return false
+		}
+	}
+	for _, ip := range ips {
+		if leaf.VerifyHostname(ip.String()) != nil {
+			return false
+		}
+	}
+	return true
 }
 
-func selfSignedPEM() (certPEM, keyPEM []byte, err error) {
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, nil, err
-	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 62))
-	if err != nil {
-		return nil, nil, err
-	}
+func certHosts() ([]string, []net.IP) {
 	host, _ := os.Hostname()
 	dns := []string{"localhost"}
 	if host != "" && host != "localhost" {
@@ -78,6 +86,19 @@ func selfSignedPEM() (certPEM, keyPEM []byte, err error) {
 			ips = append(ips, ip)
 		}
 	}
+	return dns, ips
+}
+
+func selfSignedPEM() (certPEM, keyPEM []byte, err error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, err
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 62))
+	if err != nil {
+		return nil, nil, err
+	}
+	dns, ips := certHosts()
 	tmpl := x509.Certificate{
 		SerialNumber:          serial,
 		Subject:               pkix.Name{CommonName: "Офис-чат", Organization: []string{"Офис-чат"}},
