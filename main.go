@@ -24,7 +24,7 @@ import (
 //go:embed web
 var webFiles embed.FS
 
-var version = "1.5.0"
+var version = "1.5.1"
 
 type Config struct {
 	Port    int    `json:"port"`
