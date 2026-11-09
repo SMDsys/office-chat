@@ -1713,3 +1713,11 @@ input, textarea { font-family: inherit; }
 .pick-add select { flex: 1; min-width: 0; }
 .export-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn.danger { color: #e06c6c; }
+
+.mute-mark {
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-left: 5px;
+  color: var(--muted);
+}
+.mute-mark .icon { width: 13px; height: 13px; }

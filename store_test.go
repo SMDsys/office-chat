@@ -269,3 +269,21 @@ func TestSelfSignedCoversLocalAddresses(t *testing.T) {
 		t.Fatal("свежий сертификат должен покрывать localhost и текущие IP")
 	}
 }
+
+func TestChatMute(t *testing.T) {
+	s := testStore(t)
+	u, _ := s.CreateUser("user1", "Первый", "hash", "salt")
+	if _, ok := s.SetChatMute(u.ID, "general", "mentions"); !ok {
+		t.Fatal("SetChatMute: пользователь не найден")
+	}
+	got := s.User(u.ID)
+	if got.Mutes["general"] != "mentions" {
+		t.Fatalf("ожидался режим mentions, получено %q", got.Mutes["general"])
+	}
+	if _, ok := s.SetChatMute(u.ID, "general", ""); !ok {
+		t.Fatal("SetChatMute: сброс не удался")
+	}
+	if _, exists := s.User(u.ID).Mutes["general"]; exists {
+		t.Fatal("пустой режим должен удалять настройку")
+	}
+}

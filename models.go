@@ -23,6 +23,8 @@ type User struct {
 	Reads     map[string]time.Time `json:"reads,omitempty"`
 	Avatar    string               `json:"avatar,omitempty"`
 	Status    string               `json:"status,omitempty"` // "" — активен, "away", "dnd"
+	// Mutes хранит режим уведомлений по чатам: "mentions" или "off".
+	Mutes map[string]string `json:"mutes,omitempty"`
 }
 
 // PublicUser — то, что можно отдавать клиенту (без хэша пароля).

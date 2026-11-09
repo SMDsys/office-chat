@@ -254,6 +254,7 @@
     hasUsers: false,
     notify: localStorage.getItem('oc-notify') === '1',
     mentions: new Set(),
+    mutes: new Map(),
   };
 
   class ApiError extends Error {
@@ -573,11 +574,13 @@
     }
     state.online = new Set(data.online);
     state.version = data.version || state.version;
+    state.mutes = new Map(Object.entries(data.mutes || {}));
 
     renderMe();
     renderChats();
     renderMembers();
 
+    if (await openFromHash()) return;
     const saved = localStorage.getItem('oc-chat');
     const target = (saved && state.chats.has(saved)) ? saved
       : (state.chats.has('general') ? 'general' : [...state.chats.keys()][0]);
@@ -750,7 +753,9 @@
     const mine = m.userId === state.me.id;
     const active = state.activeChat === m.chatId && document.visibilityState === 'visible';
     const mention = !mine && mentionsMe(m.text);
-    const quiet = state.me && state.me.status === 'dnd';
+    const muteMode = state.mutes.get(m.chatId) || '';
+    const quiet = (state.me && state.me.status === 'dnd') ||
+      muteMode === 'off' || (muteMode === 'mentions' && !mention);
 
     if (active) {
       const atBottom = isAtBottom();
@@ -800,6 +805,66 @@
     if (idle && !state.me.status) setStatus('away', true);
     else if (!idle && state.me.status === 'away') setStatus('', true);
   }, 60000);
+
+  // setChatMute задаёт режим уведомлений по чату: все, только упоминания или тихо.
+  async function setChatMute(chatId, mode) {
+    try {
+      const data = await api(`/api/chats/${encodeURIComponent(chatId)}/notify`, {
+        method: 'PUT', body: { mode },
+      });
+      state.mutes = new Map(Object.entries(data.mutes || {}));
+      renderChats();
+      toast(mode === 'off' ? 'Уведомления по чату отключены'
+        : mode === 'mentions' ? 'Только упоминания'
+          : 'Уведомления включены');
+    } catch (ex) { toast(ex.message, 'error'); }
+  }
+
+  // copyText сначала пробует Clipboard API, затем запасной путь для http.
+  async function copyText(text) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_) {}
+    try {
+      const ta = el('textarea', { style: 'position:fixed;left:-9999px;top:0;opacity:0' });
+      ta.value = text;
+      document.body.append(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (_) { return false; }
+  }
+
+  function messageLink(m) {
+    return `${location.origin}${location.pathname}#c=${encodeURIComponent(m.chatId)}&m=${encodeURIComponent(m.id)}&t=${new Date(m.createdAt).getTime()}`;
+  }
+
+  async function copyMessageLink(m) {
+    const ok = await copyText(messageLink(m));
+    toast(ok ? 'Ссылка скопирована' : 'Не удалось скопировать ссылку', ok ? 'ok' : 'error');
+  }
+
+  // openFromHash открывает чат и сообщение по ссылке #c=…&m=…&t=…
+  async function openFromHash() {
+    const raw = location.hash.replace(/^#/, '');
+    if (!raw) return false;
+    const p = new URLSearchParams(raw);
+    const chatId = p.get('c');
+    if (!chatId || !state.chats.has(chatId)) return false;
+    const id = p.get('m') || '';
+    const t = Number(p.get('t'));
+    await openChat(chatId, {
+      before: t > 0 ? new Date(t + 1000).toISOString() : undefined,
+      jumpTo: id || undefined,
+    });
+    return true;
+  }
+
+  window.addEventListener('hashchange', () => { openFromHash().catch(() => {}); });
 
   function onUpdated(m) {
     const list = state.messages.get(m.chatId);
@@ -914,8 +979,12 @@
       node.append(el('span', { class: 'glyph' }, icon(chat.private ? 'lock' : 'hash')));
     }
 
+    const muteMode = state.mutes.get(chat.id) || '';
     node.append(el('span', { class: 'chat-meta' },
-      el('strong', {}, chatTitle(chat)),
+      el('strong', {}, chatTitle(chat), muteMode ? el('span', {
+        class: 'mute-mark',
+        title: muteMode === 'off' ? 'Уведомления отключены' : 'Только упоминания',
+      }, icon('bell-off')) : null),
       el('small', {}, lastPreview(chat))));
 
     if (unread) {
@@ -945,7 +1014,12 @@
     glyph.textContent = '';
     glyph.append(icon(chat.isDm ? 'at' : chat.private ? 'lock' : 'hash'));
     const menuBtn = $('#chatMenuBtn');
-    if (menuBtn) menuBtn.hidden = !!chat.isDm;
+    if (menuBtn) {
+      menuBtn.hidden = false;
+      const label = chat.isDm ? 'Уведомления' : 'О канале';
+      menuBtn.title = label;
+      menuBtn.setAttribute('aria-label', label);
+    }
     renderTyping();
   }
 
@@ -1040,6 +1114,7 @@
 
   async function openChat(id, opts = {}) {
     if (!state.chats.has(id)) return;
+    if (location.hash && !opts.jumpTo) history.replaceState(null, '', location.pathname + location.search);
     if (state.activeChat && state.activeChat !== id) saveDraft();
     state.activeChat = id;
     localStorage.setItem('oc-chat', id);
@@ -1220,6 +1295,10 @@
       class: 'icon-btn', title: m.pinned ? 'Открепить' : 'Закрепить', 'aria-label': 'Закрепить',
       onclick: () => togglePin(m),
     }, icon('pin')));
+    box.append(el('button', {
+      class: 'icon-btn', title: 'Ссылка на сообщение', 'aria-label': 'Ссылка на сообщение',
+      onclick: (e) => { e.stopPropagation(); copyMessageLink(m); },
+    }, icon('link')));
     if (mine || (state.me && state.me.isAdmin)) {
       box.append(el('button', { class: 'icon-btn', title: 'Изменить', 'aria-label': 'Изменить', onclick: () => startEdit(m) }, icon('edit')));
       box.append(el('button', { class: 'icon-btn', title: 'Удалить', 'aria-label': 'Удалить', onclick: () => deleteMessage(m) }, icon('trash')));
@@ -2199,8 +2278,42 @@
 
   function openChannelInfo() {
     const chat = state.chats.get(state.activeChat);
-    if (!chat || chat.isDm) return;
-    const canManage = chat.createdBy === state.me.id || state.me.isAdmin;
+    if (!chat) return;
+    const isDM = !!chat.isDm;
+    const canManage = !isDM && (chat.createdBy === state.me.id || state.me.isAdmin);
+
+    const notifyRow = el('div', { class: 'status-row' });
+    const drawNotify = () => {
+      notifyRow.textContent = '';
+      const cur = state.mutes.get(chat.id) || '';
+      for (const [label, value] of [
+        ['Все сообщения', ''],
+        ['Только упоминания', 'mentions'],
+        ['Тихо', 'off'],
+      ]) {
+        notifyRow.append(el('button', {
+          class: 'chip' + (cur === value ? ' is-on' : ''),
+          onclick: async () => { await setChatMute(chat.id, value); drawNotify(); },
+        }, label));
+      }
+    };
+    drawNotify();
+
+    if (isDM) {
+      const other = chat.dmUser || dmPartner(chat);
+      const dmModal = openModal({
+        title: 'Личный чат',
+        body: [
+          el('p', { class: 'modal-text' }, other ? `Переписка с ${other.name}.` : 'Личная переписка.'),
+          el('h3', { class: 'modal-sub' }, 'Уведомления'),
+          notifyRow,
+          el('p', { class: 'form-hint' }, 'Тихий режим выключает звук и всплывающие уведомления, но счётчик непрочитанных остаётся.'),
+        ],
+        footer: [el('button', { class: 'btn btn-primary', onclick: () => dmModal.close() }, 'Закрыть')],
+      });
+      return;
+    }
+
     const name = el('input', { value: chat.name || '', maxlength: '40', disabled: !canManage });
     const topic = el('input', { value: chat.topic || '', maxlength: '160', disabled: !canManage });
     const membersBox = el('div', { class: 'admin-list' });
@@ -2270,6 +2383,8 @@
         : 'Открытый канал: его видят все сотрудники.'),
       el('label', { class: 'field' }, el('span', {}, 'Название'), name),
       el('label', { class: 'field' }, el('span', {}, 'Описание'), topic),
+      el('h3', { class: 'modal-sub' }, 'Уведомления'),
+      notifyRow,
     ];
     if (canManage) {
       body.push(el('button', {

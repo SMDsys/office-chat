@@ -387,6 +387,7 @@ func (s *Store) User(id string) *User {
 			c.Reads[k] = v
 		}
 	}
+	c.Mutes = copyMutes(u.Mutes)
 	return &c
 }
 
@@ -408,6 +409,7 @@ func (s *Store) UserByLogin(login string) *User {
 			c.Reads[k] = v
 		}
 	}
+	c.Mutes = copyMutes(u.Mutes)
 	return &c
 }
 
@@ -434,6 +436,37 @@ func (s *Store) UpdateUser(id string, fn func(*User)) (*User, bool) {
 	s.dirtyUsers = true
 	c := *u
 	return &c, true
+}
+
+// SetChatMute задаёт режим уведомлений по чату: "mentions", "off" или "" (все).
+func (s *Store) SetChatMute(userID, chatID, mode string) (map[string]string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u := s.users[userID]
+	if u == nil {
+		return nil, false
+	}
+	if mode == "" {
+		delete(u.Mutes, chatID)
+	} else {
+		if u.Mutes == nil {
+			u.Mutes = map[string]string{}
+		}
+		u.Mutes[chatID] = mode
+	}
+	s.dirtyUsers = true
+	return copyMutes(u.Mutes), true
+}
+
+func copyMutes(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *Store) TouchUser(id string) {

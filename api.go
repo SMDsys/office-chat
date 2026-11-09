@@ -170,7 +170,10 @@ func (a *App) handleLogout(w http.ResponseWriter, r *http.Request, u *User) {
 }
 
 func (a *App) handleMe(w http.ResponseWriter, r *http.Request, u *User) {
-	writeJSON(w, 200, map[string]any{"user": u.Public(a.hub.IsOnline(u.ID))})
+	writeJSON(w, 200, map[string]any{
+		"user":  u.Public(a.hub.IsOnline(u.ID)),
+		"mutes": u.Mutes,
+	})
 }
 
 func (a *App) handleUpdateMe(w http.ResponseWriter, r *http.Request, u *User) {
@@ -238,6 +241,34 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request, u *Us
 	})
 	a.store.DeleteOtherSessions(u.ID, sessionToken(r))
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// handleChatNotify задаёт режим уведомлений по чату: все, только упоминания или тихо.
+func (a *App) handleChatNotify(w http.ResponseWriter, r *http.Request, u *User) {
+	id := r.PathValue("id")
+	if !a.store.CanAccess(id, u.ID) {
+		writeErr(w, 403, "нет доступа к этому чату")
+		return
+	}
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	switch req.Mode {
+	case "", "mentions", "off":
+	default:
+		writeErr(w, 400, "режим: все, mentions или off")
+		return
+	}
+	mutes, ok := a.store.SetChatMute(u.ID, id, req.Mode)
+	if !ok {
+		writeErr(w, 404, "пользователь не найден")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"mutes": mutes})
 }
 
 // handleStatus меняет ручной статус: активен, отошёл или не беспокоить.
@@ -315,6 +346,7 @@ func (a *App) handleBootstrap(w http.ResponseWriter, r *http.Request, u *User) {
 		"users":      pub,
 		"chats":      chats,
 		"online":     a.hub.OnlineUsers(),
+		"mutes":      u.Mutes,
 		"serverTime": time.Now(),
 		"version":    a.version,
 	})
