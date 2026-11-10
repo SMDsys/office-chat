@@ -976,7 +976,7 @@
       const other = chat.dmUser || dmPartner(chat);
       node.append(avatarEl(other || { name: '?', color: '#555' }, other && state.online.has(other.id), 28));
     } else {
-      node.append(el('span', { class: 'glyph' }, icon(chat.private ? 'lock' : 'hash')));
+      node.append(el('span', { class: 'glyph' }, icon(chat.readOnly ? 'megaphone' : chat.private ? 'lock' : 'hash')));
     }
 
     const muteMode = state.mutes.get(chat.id) || '';
@@ -1012,7 +1012,7 @@
     $('#chatTopic').textContent = chatSubtitle(chat);
     const glyph = $('#chatGlyph');
     glyph.textContent = '';
-    glyph.append(icon(chat.isDm ? 'at' : chat.private ? 'lock' : 'hash'));
+    glyph.append(icon(chat.isDm ? 'at' : chat.readOnly ? 'megaphone' : chat.private ? 'lock' : 'hash'));
     const menuBtn = $('#chatMenuBtn');
     if (menuBtn) {
       menuBtn.hidden = false;
@@ -1020,7 +1020,21 @@
       menuBtn.title = label;
       menuBtn.setAttribute('aria-label', label);
     }
+    renderComposerState();
     renderTyping();
+  }
+
+  // В канале-объявлении писать могут только создатель и администраторы.
+  function renderComposerState() {
+    const chat = state.chats.get(state.activeChat);
+    const locked = !!chat && !chat.isDm && !!chat.readOnly &&
+      state.me.id !== chat.createdBy && !state.me.isAdmin;
+    const box = $('#composerBox');
+    const note = $('#readonlyNote');
+    if (box) box.hidden = locked;
+    if (note) note.hidden = !locked;
+    const hint = document.querySelector('.composer-hint');
+    if (hint) hint.hidden = locked;
   }
 
   function renderTyping() {
@@ -2153,6 +2167,8 @@
         case 'grant_admin': return `${e.actor} назначил ${e.target} администратором`;
         case 'revoke_admin': return `${e.actor} снял права администратора с ${e.target}`;
         case 'channel_members': return `${e.actor} изменил участников канала «${e.target}» ${e.detail || ''}`.trim();
+        case 'channel_readonly': return `${e.actor} переключил канал «${e.target}»: ${e.detail || ''}`;
+        case 'backup': return `${e.actor} создал резервную копию`;
         default: return `${e.actor}: ${e.action}${e.target ? ' ' + e.target : ''}`;
       }
     };
@@ -2172,12 +2188,63 @@
     }
     loadAudit();
 
+    const bytesText = (n) => {
+      if (!n) return '0 Б';
+      const units = ['Б', 'КБ', 'МБ', 'ГБ', 'ТБ'];
+      let v = n, i = 0;
+      while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+      return (i ? v.toFixed(1).replace('.', ',') : String(Math.round(v))) + ' ' + units[i];
+    };
+
+    const backupsBox = el('div', { class: 'backup-list' }, el('p', { class: 'modal-text' }, 'Загрузка…'));
+    const loadBackups = () => {
+      api('/api/admin/backups').then((d) => {
+        backupsBox.textContent = '';
+        backupsBox.append(el('p', { class: 'form-hint' },
+          `Копий: ${d.backups.length} · ${bytesText(d.backupBytes)} · вложения: ${bytesText(d.uploadBytes)} · свободно: ${bytesText(d.freeBytes)} из ${bytesText(d.diskBytes)}`));
+        if (!d.backups.length) {
+          backupsBox.append(el('p', { class: 'modal-text' }, 'Копий пока нет'));
+          return;
+        }
+        for (const b of d.backups.slice(0, 10)) {
+          backupsBox.append(el('div', { class: 'admin-row' },
+            el('span', { class: 'a-text' },
+              el('strong', {}, fmtDateTime(b.at)),
+              el('small', {}, b.name)),
+            el('span', { class: 'backup-size' }, bytesText(b.size)),
+            el('a', {
+              class: 'icon-btn', href: `/api/admin/backups/${encodeURIComponent(b.name)}`,
+              title: 'Скачать копию', 'aria-label': 'Скачать копию', download: '',
+            }, icon('down'))));
+        }
+      }).catch(() => { backupsBox.textContent = 'Не удалось загрузить копии'; });
+    };
+    loadBackups();
+
+    const createBackup = el('button', {
+      class: 'btn',
+      onclick: async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        try {
+          await api('/api/admin/backups', { method: 'POST', body: {} });
+          toast('Копия создана');
+          loadBackups();
+          loadAudit();
+        } catch (ex) { toast(ex.message, 'error'); } finally { btn.disabled = false; }
+      },
+    }, 'Создать копию');
+
     openModal({
       title: 'Сотрудники',
       wide: true,
       body: [
         el('p', { class: 'modal-text' }, 'Новый сотрудник регистрируется сам на странице входа. Здесь можно сбросить пароль или закрыть доступ.'),
         list,
+        el('h3', { class: 'modal-sub' }, 'Резервные копии'),
+        el('p', { class: 'form-hint' }, 'Копия создаётся автоматически раз в сутки и хранится 10 последних. Вложения лежат отдельно и не дублируются.'),
+        el('div', { class: 'export-row' }, createBackup),
+        backupsBox,
         el('h3', { class: 'modal-sub' }, 'Журнал действий'),
         auditBox,
       ],
@@ -2314,6 +2381,24 @@
       return;
     }
 
+    const readOnlySwitch = el('button', {
+      class: 'switch' + (chat.readOnly ? ' is-on' : ''),
+      'aria-label': 'Только объявления',
+      onclick: async (e) => {
+        const next = !chat.readOnly;
+        try {
+          const data = await api(`/api/chats/${encodeURIComponent(chat.id)}/readonly`, {
+            method: 'PUT', body: { readOnly: next },
+          });
+          Object.assign(chat, data.chat || {});
+          state.chats.set(chat.id, { ...chat });
+          e.currentTarget.classList.toggle('is-on', next);
+          renderChats(); renderHeader(); renderMembers();
+          toast(next ? 'Теперь писать могут только создатель и админы' : 'Канал снова обычный');
+        } catch (ex) { toast(ex.message, 'error'); }
+      },
+    });
+
     const name = el('input', { value: chat.name || '', maxlength: '40', disabled: !canManage });
     const topic = el('input', { value: chat.topic || '', maxlength: '160', disabled: !canManage });
     const membersBox = el('div', { class: 'admin-list' });
@@ -2358,23 +2443,25 @@
         .filter(u => !u.blocked && !(chat.members || []).includes(u.id))
         .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
       if (!candidates.length) return;
-      const select = el('select', {});
+      const select = el('select', { multiple: '', size: '4', 'aria-label': 'Кого добавить' });
       for (const u of candidates) select.append(el('option', { value: u.id }, u.name));
       addBox.append(el('div', { class: 'pick-add' },
         select,
         el('button', {
           class: 'btn', onclick: async () => {
+            const ids = [...select.selectedOptions].map(o => o.value);
+            if (!ids.length) { toast('Выберите сотрудников', 'error'); return; }
             try {
               const data = await api(`/api/chats/${encodeURIComponent(chat.id)}/members`, {
-                method: 'POST', body: { add: [select.value] },
+                method: 'POST', body: { add: ids },
               });
               chat.members = data.chat.members;
               state.chats.set(chat.id, { ...chat });
               drawMembers(); drawAdd(); renderMembers();
-              toast('Участник добавлен');
+              toast(ids.length > 1 ? `Добавлено: ${ids.length}` : 'Участник добавлен');
             } catch (ex) { toast(ex.message, 'error'); }
           },
-        }, 'Добавить')));
+        }, 'Добавить выбранных')));
     };
 
     const body = [
@@ -2383,9 +2470,12 @@
         : 'Открытый канал: его видят все сотрудники.'),
       el('label', { class: 'field' }, el('span', {}, 'Название'), name),
       el('label', { class: 'field' }, el('span', {}, 'Описание'), topic),
-      el('h3', { class: 'modal-sub' }, 'Уведомления'),
-      notifyRow,
     ];
+    if (canManage) {
+      body.push(el('div', { class: 'toggle-row' }, el('span', {}, 'Только объявления'), readOnlySwitch));
+      body.push(el('p', { class: 'form-hint' }, 'Писать смогут только создатель канала и администраторы, остальные читают.'));
+    }
+    body.push(el('h3', { class: 'modal-sub' }, 'Уведомления'), notifyRow);
     if (canManage) {
       body.push(el('button', {
         class: 'btn', onclick: async () => {
@@ -2501,10 +2591,16 @@
     const open = force !== undefined ? force : panel.hidden;
     panel.hidden = !open;
     $('#searchResults').hidden = !open || !$('#searchResults').children.length;
+    $('#searchFilters').hidden = !open;
     if (open) {
+      fillSearchFilters();
       setTimeout(() => $('#searchInput').focus(), 30);
     } else {
       $('#searchInput').value = '';
+      $('#searchFrom').value = '';
+      $('#searchTo').value = '';
+      $('#searchChat').value = '';
+      $('#searchAuthor').value = '';
       $('#searchResults').textContent = '';
       $('#searchResults').hidden = true;
     }
@@ -2525,16 +2621,41 @@
     }
   });
 
-  $('#searchInput').addEventListener('input', debounce(async (e) => {
-    const q = e.target.value.trim();
+  function fillSearchFilters() {
+    const chatSel = $('#searchChat');
+    const authorSel = $('#searchAuthor');
+    const chatId = chatSel.value;
+    const authorId = authorSel.value;
+    chatSel.textContent = '';
+    chatSel.append(el('option', { value: '' }, 'Все чаты'));
+    const chats = [...state.chats.values()].sort((a, b) => chatTitle(a).localeCompare(chatTitle(b), 'ru'));
+    for (const c of chats) {
+      chatSel.append(el('option', { value: c.id }, (c.isDm ? 'Личные · ' : '') + chatTitle(c)));
+    }
+    chatSel.value = chatId;
+    authorSel.textContent = '';
+    authorSel.append(el('option', { value: '' }, 'Все авторы'));
+    const users = [...state.users.values()].filter(u => !u.blocked)
+      .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    for (const u of users) authorSel.append(el('option', { value: u.id }, u.name));
+    authorSel.value = authorId;
+  }
+
+  const runSearch = debounce(async () => {
+    const q = $('#searchInput').value.trim();
     const box = $('#searchResults');
     if (q.length < 2) {
       box.textContent = '';
       box.hidden = true;
       return;
     }
+    const params = new URLSearchParams({ q });
+    for (const [key, id] of [['chat', '#searchChat'], ['user', '#searchAuthor'], ['from', '#searchFrom'], ['to', '#searchTo']]) {
+      const v = $(id).value;
+      if (v) params.set(key, v);
+    }
     try {
-      const data = await api(`/api/search?q=${encodeURIComponent(q)}`);
+      const data = await api('/api/search?' + params.toString());
       box.textContent = '';
       const msgs = data.messages || [];
       if (!msgs.length) {
@@ -2544,6 +2665,9 @@
           const chat = state.chats.get(m.chatId);
           const author = state.users.get(m.userId);
           const title = chat ? (chat.isDm ? 'Личные' : chatTitle(chat)) : 'Чат';
+          const preview = m.text || (m.files && m.files.length
+            ? '📎 ' + m.files.map(f => f.name).join(', ')
+            : '');
           box.append(el('button', {
             class: 'sr-item',
             onclick: () => jumpToSearchResult(m),
@@ -2551,14 +2675,19 @@
             el('span', { class: 'sr-top' },
               el('span', {}, `${title} · ${author ? author.name : '?'}`),
               el('span', {}, fullFmt.format(new Date(m.createdAt)))),
-            el('span', { class: 'sr-text' }, highlight(m.text || '📎 файл', q))));
+            el('span', { class: 'sr-text' }, highlight(preview, q))));
         }
       }
       box.hidden = false;
     } catch (ex) {
       toast(ex.message, 'error');
     }
-  }, 300));
+  }, 300);
+
+  $('#searchInput').addEventListener('input', runSearch);
+  for (const id of ['#searchChat', '#searchAuthor', '#searchFrom', '#searchTo']) {
+    $(id).addEventListener('change', runSearch);
+  }
 
   async function jumpToSearchResult(m) {
     toggleSearch(false);

@@ -39,11 +39,13 @@ jobs:
           GOOS: windows
           GOARCH: amd64
           CGO_ENABLED: "0"
-        run: go build -trimpath -ldflags "-s -w" -o dist/OfficeChat.exe .
+        run: |
+          go build -trimpath -ldflags "-s -w" -o dist/OfficeChat.exe .
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o dist/OfficeChat-Client.exe ./cmd/client
       - uses: actions/upload-artifact@v4
         with:
           name: OfficeChat-win64
-          path: dist/OfficeChat.exe
+          path: dist/
           if-no-files-found: error
 
   release:
@@ -65,10 +67,11 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           go build -trimpath -ldflags "-s -w" -o dist/OfficeChat.exe .
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o dist/OfficeChat-Client.exe ./cmd/client
           cp packaging/config.json packaging/install.bat packaging/uninstall.bat \
              packaging/run.bat "packaging/Подключиться.bat" "packaging/Включить HTTPS.bat" \
              "packaging/Доверять сертификату.bat" "packaging/Убрать доверие.bat" \
-             packaging/README.txt dist/
+             packaging/client.ini packaging/README.txt dist/
           cd dist
           VERSION="${GITHUB_REF_NAME#v}"
           zip -r "../OfficeChat-${VERSION}-win64.zip" .

@@ -63,8 +63,9 @@ type Channel struct {
 	Name      string    `json:"name"`
 	Topic     string    `json:"topic"`
 	IsDM      bool      `json:"isDm"`
-	Private   bool      `json:"private,omitempty"` // закрытый канал: доступ только участникам
-	Members   []string  `json:"members,omitempty"` // DM и закрытые каналы
+	Private   bool      `json:"private,omitempty"`  // закрытый канал: доступ только участникам
+	ReadOnly  bool      `json:"readOnly,omitempty"` // канал-объявление: пишут создатель и админы
+	Members   []string  `json:"members,omitempty"`  // DM и закрытые каналы
 	CreatedBy string    `json:"createdBy"`
 	CreatedAt time.Time `json:"createdAt"`
 }

@@ -661,6 +661,26 @@ input, textarea { font-family: inherit; }
   outline: none;
 }
 
+.search-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 14px 8px;
+}
+
+.search-filters select,
+.search-filters input {
+  flex: 1 1 110px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+}
+
 .search-results {
   margin: 0 14px 10px;
   max-height: 42vh;
@@ -1237,6 +1257,20 @@ input, textarea { font-family: inherit; }
 .send:disabled { opacity: .35; cursor: default; }
 .send .icon { width: 17px; height: 17px; }
 
+.composer-readonly {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 14px 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.composer-readonly .icon { width: 16px; height: 16px; flex: none; }
+
 .composer-hint {
   margin-top: 6px;
   font-size: 11px;
@@ -1721,3 +1755,6 @@ input, textarea { font-family: inherit; }
   color: var(--muted);
 }
 .mute-mark .icon { width: 13px; height: 13px; }
+
+.backup-size { color: var(--muted); font-size: 12px; margin-left: auto; }
+.pick-add select[multiple] { height: auto; min-height: 96px; padding: 4px; }

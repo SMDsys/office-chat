@@ -402,6 +402,10 @@ func (a *App) handleSendMessage(w http.ResponseWriter, r *http.Request, u *User)
 		writeErr(w, 403, "нет доступа к этому чату")
 		return
 	}
+	if ch := a.store.Channel(req.ChatID); ch != nil && ch.ReadOnly && u.ID != ch.CreatedBy && !u.IsAdmin {
+		writeErr(w, 403, "в этот канал пишут только администратор и создатель")
+		return
+	}
 	text := cleanText(req.Text)
 	if runeLen(text) > 4000 {
 		writeErr(w, 400, "сообщение длиннее 4000 символов")
@@ -808,13 +812,39 @@ func (a *App) handlePins(w http.ResponseWriter, r *http.Request, u *User) {
 
 func (a *App) handleSearch(w http.ResponseWriter, r *http.Request, u *User) {
 	q := r.URL.Query().Get("q")
-	chatID := r.URL.Query().Get("chat")
 	if runeLen(q) < 2 {
 		writeJSON(w, 200, map[string]any{"messages": []*Message{}})
 		return
 	}
-	msgs := a.store.Search(u.ID, q, chatID, 100)
+	opt := SearchOptions{
+		UserID:   u.ID,
+		Query:    q,
+		ChatID:   r.URL.Query().Get("chat"),
+		AuthorID: r.URL.Query().Get("user"),
+		From:     parseDay(r.URL.Query().Get("from"), false),
+		To:       parseDay(r.URL.Query().Get("to"), true),
+		Limit:    100,
+	}
+	msgs := a.store.Search(opt)
 	writeJSON(w, 200, map[string]any{"messages": msgs})
+}
+
+// parseDay понимает дату 2026-11-10 и полный RFC3339; to — конец дня.
+func parseDay(v string, end bool) time.Time {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return time.Time{}
+	}
+	if t, err := time.ParseInLocation("2006-01-02", v, time.Local); err == nil {
+		if end {
+			return t.Add(24*time.Hour - time.Nanosecond)
+		}
+		return t
+	}
+	if t, err := time.Parse(time.RFC3339, v); err == nil {
+		return t
+	}
+	return time.Time{}
 }
 
 // ---------- Администратор ----------

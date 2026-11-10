@@ -245,13 +245,13 @@ func TestPrivateChannelSearchHidden(t *testing.T) {
 	}
 	s.AddMessage(&Message{ID: "m1", ChatID: ch.ID, UserID: u1.ID, Text: "секретный текст", CreatedAt: time.Now()})
 
-	for _, m := range s.Search(u3.ID, "секретный", "", 100) {
+	for _, m := range s.Search(SearchOptions{UserID: u3.ID, Query: "секретный", Limit: 100}) {
 		t.Fatalf("посторонний нашёл сообщение закрытого канала: %q", m.Text)
 	}
-	if got := s.Search(u3.ID, "секретный", ch.ID, 100); len(got) != 0 {
+	if got := s.Search(SearchOptions{UserID: u3.ID, Query: "секретный", ChatID: ch.ID, Limit: 100}); len(got) != 0 {
 		t.Fatalf("поиск по закрытому каналу вернул %d сообщений постороннему", len(got))
 	}
-	if got := s.Search(u2.ID, "секретный", "", 100); len(got) != 1 {
+	if got := s.Search(SearchOptions{UserID: u2.ID, Query: "секретный", Limit: 100}); len(got) != 1 {
 		t.Fatalf("участник должен найти сообщение, найдено %d", len(got))
 	}
 }
@@ -285,5 +285,57 @@ func TestChatMute(t *testing.T) {
 	}
 	if _, exists := s.User(u.ID).Mutes["general"]; exists {
 		t.Fatal("пустой режим должен удалять настройку")
+	}
+}
+
+func TestSearchByAttachmentAndFilters(t *testing.T) {
+	s := testStore(t)
+	u1, err := s.CreateUser("user1", "Один", "hash", "salt")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	u2, err := s.CreateUser("user2", "Два", "hash", "salt")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	ch, err := s.CreateChannelWith("Тестовый", "", u1.ID, false, nil)
+	if err != nil {
+		t.Fatalf("CreateChannelWith: %v", err)
+	}
+	now := time.Now()
+	s.AddMessage(&Message{
+		ID: "m1", ChatID: ch.ID, UserID: u1.ID, Text: "посмотри файл",
+		Files:     []Attachment{{ID: "f1", Name: "Договор поставки.pdf"}},
+		CreatedAt: now,
+	})
+	s.AddMessage(&Message{ID: "m2", ChatID: ch.ID, UserID: u2.ID, Text: "договор обсудили", CreatedAt: now.Add(-time.Hour)})
+
+	if got := s.Search(SearchOptions{UserID: u1.ID, Query: "договор", Limit: 10}); len(got) != 2 {
+		t.Fatalf("поиск по тексту и имени файла: получено %d", len(got))
+	}
+	if got := s.Search(SearchOptions{UserID: u1.ID, Query: "договор", AuthorID: u2.ID, Limit: 10}); len(got) != 1 || got[0].ID != "m2" {
+		t.Fatalf("фильтр по автору: %v", got)
+	}
+	if got := s.Search(SearchOptions{UserID: u1.ID, Query: "договор", From: now.Add(-30 * time.Minute), Limit: 10}); len(got) != 1 || got[0].ID != "m1" {
+		t.Fatalf("фильтр по дате: %v", got)
+	}
+}
+
+func TestSetChannelReadOnly(t *testing.T) {
+	s := testStore(t)
+	u, err := s.CreateUser("user1", "Один", "hash", "salt")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	ch, err := s.CreateChannelWith("Новости", "", u.ID, false, nil)
+	if err != nil {
+		t.Fatalf("CreateChannelWith: %v", err)
+	}
+	updated, err := s.SetChannelReadOnly(ch.ID, true)
+	if err != nil {
+		t.Fatalf("SetChannelReadOnly: %v", err)
+	}
+	if !updated.ReadOnly || !s.Channel(ch.ID).ReadOnly {
+		t.Fatal("режим объявлений не сохранился")
 	}
 }

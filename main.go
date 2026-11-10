@@ -24,7 +24,7 @@ import (
 //go:embed web
 var webFiles embed.FS
 
-var version = "1.6.0"
+var version = "1.7.0"
 
 type Config struct {
 	Port    int    `json:"port"`
@@ -378,6 +378,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("PATCH /api/chats/{id}", a.auth(a.handleUpdateChannel))
 	mux.HandleFunc("DELETE /api/chats/{id}", a.auth(a.handleDeleteChannel))
 	mux.HandleFunc("POST /api/chats/{id}/members", a.auth(a.handleChannelMembers))
+	mux.HandleFunc("PUT /api/chats/{id}/readonly", a.auth(a.handleChannelReadOnly))
 	mux.HandleFunc("PUT /api/chats/{id}/notify", a.auth(a.handleChatNotify))
 	mux.HandleFunc("GET /api/chats/{id}/export", a.auth(a.handleExport))
 	mux.HandleFunc("POST /api/dm", a.auth(a.handleCreateDM))
@@ -393,6 +394,9 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/admin/users/{id}/block", a.auth(a.handleAdminBlock))
 	mux.HandleFunc("GET /api/admin/audit", a.auth(a.handleAdminAudit))
 	mux.HandleFunc("POST /api/admin/users/{id}/admin", a.auth(a.handleAdminAdmin))
+	mux.HandleFunc("GET /api/admin/backups", a.auth(a.handleAdminBackups))
+	mux.HandleFunc("POST /api/admin/backups", a.auth(a.handleAdminBackupCreate))
+	mux.HandleFunc("GET /api/admin/backups/{name}", a.auth(a.handleAdminBackupDownload))
 
 	mux.Handle("/", staticHandler())
 	return a.middleware(mux)

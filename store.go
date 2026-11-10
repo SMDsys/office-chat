@@ -809,29 +809,43 @@ func (s *Store) Unread(userID, chatID string) int {
 	return n
 }
 
-func (s *Store) Search(userID, q, chatID string, limit int) []*Message {
-	q = strings.ToLower(strings.TrimSpace(q))
+// SearchOptions ограничивает поиск по чату, автору и датам.
+type SearchOptions struct {
+	UserID   string
+	Query    string
+	ChatID   string
+	AuthorID string
+	From     time.Time
+	To       time.Time
+	Limit    int
+}
+
+func (s *Store) Search(opt SearchOptions) []*Message {
+	q := strings.ToLower(strings.TrimSpace(opt.Query))
 	if q == "" {
 		return []*Message{}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	limit := opt.Limit
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
 	chatIDs := []string{}
-	if chatID != "" {
-		if c := s.channels[chatID]; c != nil && ((!c.IsDM && !c.Private) || contains(c.Members, userID)) {
-			chatIDs = append(chatIDs, chatID)
+	allowed := func(c *Channel) bool {
+		return (!c.IsDM && !c.Private) || contains(c.Members, opt.UserID)
+	}
+	if opt.ChatID != "" {
+		if c := s.channels[opt.ChatID]; c != nil && allowed(c) {
+			chatIDs = append(chatIDs, opt.ChatID)
 		}
 	} else {
 		for id, c := range s.channels {
-			if (!c.IsDM && !c.Private) || contains(c.Members, userID) {
+			if allowed(c) {
 				chatIDs = append(chatIDs, id)
 			}
 		}
 	}
-	out := []*Message{}
 	all := []*Message{}
 	for _, id := range chatIDs {
 		if chat := s.chats[id]; chat != nil {
@@ -839,15 +853,36 @@ func (s *Store) Search(userID, q, chatID string, limit int) []*Message {
 		}
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].CreatedAt.After(all[j].CreatedAt) })
+	out := []*Message{}
 	for _, m := range all {
 		if m.Deleted {
 			continue
 		}
-		if strings.Contains(strings.ToLower(m.Text), q) {
-			out = append(out, m.Clone())
-			if len(out) >= limit {
-				break
+		if opt.AuthorID != "" && m.UserID != opt.AuthorID {
+			continue
+		}
+		if !opt.From.IsZero() && m.CreatedAt.Before(opt.From) {
+			continue
+		}
+		if !opt.To.IsZero() && m.CreatedAt.After(opt.To) {
+			continue
+		}
+		hit := strings.Contains(strings.ToLower(m.Text), q)
+		if !hit {
+			// Ищем и по именам вложений: «договор.pdf» находится так же, как текст.
+			for _, f := range m.Files {
+				if strings.Contains(strings.ToLower(f.Name), q) {
+					hit = true
+					break
+				}
 			}
+		}
+		if !hit {
+			continue
+		}
+		out = append(out, m.Clone())
+		if len(out) >= limit {
+			break
 		}
 	}
 	return out
@@ -1100,6 +1135,21 @@ func (s *Store) Backup() error {
 	return nil
 }
 
+// SetChannelReadOnly включает и выключает режим объявлений.
+func (s *Store) SetChannelReadOnly(id string, readOnly bool) (*Channel, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := s.channels[id]
+	if c == nil || c.IsDM {
+		return nil, errors.New("канал не найден")
+	}
+	c.ReadOnly = readOnly
+	s.dirtyChannels = true
+	cp := *c
+	cp.Members = append([]string(nil), c.Members...)
+	return &cp, nil
+}
+
 func uniqueIDs(ids []string) []string {
 	seen := make(map[string]bool, len(ids))
 	out := make([]string, 0, len(ids))
@@ -1212,4 +1262,48 @@ func (s *Store) syncUploads(dst string) error {
 		s.log.Printf("вложений скопировано в резерв: %d", copied)
 	}
 	return nil
+}
+
+// BackupInfo — одна резервная копия для панели администратора.
+type BackupInfo struct {
+	Name string    `json:"name"`
+	Size int64     `json:"size"`
+	At   time.Time `json:"at"`
+}
+
+// Backups перечисляет копии от новых к старым и считает их общий размер.
+func (s *Store) Backups() ([]BackupInfo, int64) {
+	entries, err := os.ReadDir(filepath.Join(s.dir, "backups"))
+	if err != nil {
+		return []BackupInfo{}, 0
+	}
+	out := make([]BackupInfo, 0, len(entries))
+	var total int64
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "officechat-") || !strings.HasSuffix(name, ".zip") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		out = append(out, BackupInfo{Name: name, Size: info.Size(), At: info.ModTime()})
+		total += info.Size()
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
+	return out, total
+}
+
+// BackupPath проверяет имя копии и возвращает полный путь к файлу.
+func (s *Store) BackupPath(name string) (string, bool) {
+	if name != filepath.Base(name) || strings.Contains(name, "..") ||
+		!strings.HasPrefix(name, "officechat-") || !strings.HasSuffix(name, ".zip") {
+		return "", false
+	}
+	full := filepath.Join(s.dir, "backups", name)
+	if info, err := os.Stat(full); err != nil || info.IsDir() {
+		return "", false
+	}
+	return full, true
 }
